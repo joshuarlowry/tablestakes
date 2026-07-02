@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TABLE STAKES — team games</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #12110e;
+    --ink-2: #1a1915;
+    --ink-3: #242219;
+    --line: #35322a;
+    --cream: #ece5d3;
+    --cream-dim: #9b937f;
+    --accent: #ff4d2e;
+    --accent-soft: rgba(255, 77, 46, 0.12);
+    --brass: #c9a86a;
+    --ok: #8fbf5f;
+    --radius: 4px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    background: var(--ink);
+    color: var(--cream);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(ellipse 80% 60% at 50% -10%, rgba(201,168,106,0.06), transparent),
+      repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(255,255,255,0.006) 3px, rgba(255,255,255,0.006) 4px);
+  }
+
+  .app {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------- masthead ---------- */
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 14px;
+    margin-bottom: 40px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .wordmark {
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 22px;
+    letter-spacing: 0.02em;
+    font-variation-settings: 'opsz' 40;
+  }
+  .wordmark em {
+    font-style: italic;
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  .conn {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--cream-dim);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .conn .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--cream-dim);
+    transition: background 0.3s;
+  }
+  .conn.live .dot { background: var(--ok); box-shadow: 0 0 8px rgba(143,191,95,0.6); }
+
+  /* ---------- entry screen ---------- */
+  .entry {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    max-width: 520px;
+  }
+
+  .entry h1 {
+    font-family: 'Fraunces', serif;
+    font-weight: 350;
+    font-size: clamp(40px, 8vw, 64px);
+    line-height: 1.02;
+    letter-spacing: -0.015em;
+    margin-bottom: 20px;
+    font-variation-settings: 'opsz' 144;
+  }
+  .entry h1 em {
+    font-style: italic;
+    color: var(--accent);
+  }
+
+  .entry p.lede {
+    color: var(--cream-dim);
+    margin-bottom: 40px;
+    max-width: 42ch;
+  }
+
+  label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--cream-dim);
+    margin-bottom: 8px;
+  }
+
+  input[type="text"] {
+    width: 100%;
+    background: var(--ink-2);
+    border: 1px solid var(--line);
+    color: var(--cream);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 16px;
+    padding: 13px 14px;
+    border-radius: var(--radius);
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus { border-color: var(--brass); }
+  input[type="text"]::placeholder { color: #55503f; }
+
+  .field { margin-bottom: 22px; }
+
+  button {
+    font-family: 'IBM Plex Mono', monospace;
+    cursor: pointer;
+    border-radius: var(--radius);
+    transition: all 0.15s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #16090a;
+    border: 1px solid var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 14px 26px;
+  }
+  .btn-primary:hover { background: #ff6547; transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--cream);
+    border: 1px solid var(--line);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    padding: 10px 16px;
+  }
+  .btn-ghost:hover { border-color: var(--brass); color: var(--brass); }
+
+  .entry-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+  .joining-note {
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--brass);
+  }
+
+  /* ---------- room ---------- */
+  .room { display: none; }
+  .room.visible { display: block; }
+  .entry.hidden { display: none; }
+
+  .room-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+
+  .room-code {
+    font-size: 12px;
+    color: var(--cream-dim);
+  }
+  .room-code strong {
+    color: var(--brass);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
+
+  /* players rail */
+  .players {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 36px;
+  }
+  .player {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 14px 6px 9px;
+    font-size: 12px;
+    animation: pop-in 0.3s cubic-bezier(0.2, 1.4, 0.4, 1);
+  }
+  @keyframes pop-in {
+    from { transform: scale(0.7); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+  }
+  .player .pip {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--line);
+    transition: background 0.25s, box-shadow 0.25s;
+  }
+  .player.locked .pip { background: var(--accent); box-shadow: 0 0 7px rgba(255,77,46,0.7); }
+  .player .tag {
+    font-size: 9px;
+    color: var(--brass);
+    border: 1px solid rgba(201,168,106,0.4);
+    border-radius: 3px;
+    padding: 0 4px;
+    letter-spacing: 0.1em;
+  }
+  .player.me { border-color: rgba(236,229,211,0.35); }
+
+  /* game area */
+  .stage {
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: linear-gradient(180deg, var(--ink-2), var(--ink));
+    padding: 40px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .stage::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(201,168,106,0.5), transparent);
+  }
+
+  .stage-kicker {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.22em;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  .stage-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 400;
+    font-size: clamp(26px, 5vw, 38px);
+    line-height: 1.1;
+    margin-bottom: 8px;
+    font-variation-settings: 'opsz' 100;
+  }
+  .stage-title em { font-style: italic; color: var(--brass); }
+
+  .stage-sub {
+    color: var(--cream-dim);
+    font-size: 13px;
+    margin-bottom: 30px;
+    max-width: 52ch;
+  }
+
+  /* game picker (lobby) */
+  .game-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 560px) { .game-cards { grid-template-columns: 1fr; } }
+
+  .game-card {
+    background: var(--ink-3);
+    border: 1px solid var(--line);
+    text-align: left;
+    padding: 22px 20px;
+    color: var(--cream);
+    border-radius: 6px;
+  }
+  .game-card:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-2px); }
+  .game-card:disabled { cursor: default; opacity: 0.9; }
+  .game-card .gc-glyphs { font-size: 26px; margin-bottom: 12px; letter-spacing: 4px; }
+  .game-card .gc-name {
+    font-family: 'Fraunces', serif;
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+  .game-card .gc-desc { font-size: 12px; color: var(--cream-dim); line-height: 1.55; }
+
+  .waiting-host {
+    color: var(--cream-dim);
+    font-size: 13px;
+    font-style: italic;
+    font-family: 'Fraunces', serif;
+    font-size: 17px;
+  }
+
+  /* choices */
+  .choices {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 8px 0 4px;
+  }
+  .choice {
+    background: var(--ink-3);
+    border: 1px solid var(--line);
+    color: var(--cream);
+    border-radius: 6px;
+    min-width: 86px;
+    padding: 18px 10px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .choice .glyph { font-size: 34px; line-height: 1; }
+  .choice .num {
+    font-family: 'Fraunces', serif;
+    font-size: 38px;
+    line-height: 1;
+    font-weight: 350;
+  }
+  .choice .lbl {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--cream-dim);
+  }
+  .choice:hover:not(:disabled) { border-color: var(--brass); transform: translateY(-3px); }
+  .choice.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .choice.selected .lbl { color: var(--accent); }
+  .choice:disabled { opacity: 0.45; cursor: default; }
+
+  .lock-note {
+    text-align: center;
+    margin-top: 22px;
+    font-size: 12px;
+    color: var(--cream-dim);
+  }
+  .lock-note strong { color: var(--accent); }
+
+  /* results */
+  .results { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+  .result-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--ink-3);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 16px;
+    animation: reveal-in 0.45s cubic-bezier(0.2, 1, 0.3, 1) both;
+  }
+  @keyframes reveal-in {
+    from { transform: translateY(14px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .result-row .r-glyph { font-size: 26px; width: 38px; text-align: center; }
+  .result-row .r-num {
+    font-family: 'Fraunces', serif;
+    font-size: 30px;
+    width: 38px;
+    text-align: center;
+    font-weight: 350;
+  }
+  .result-row .r-name { flex: 1; font-size: 13px; }
+  .result-row .r-choice {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--cream-dim);
+  }
+  .result-row.winner { border-color: var(--ok); }
+  .result-row.winner .r-choice { color: var(--ok); }
+
+  .verdict {
+    font-family: 'Fraunces', serif;
+    font-size: clamp(22px, 4.5vw, 30px);
+    font-weight: 400;
+    text-align: center;
+    margin: 26px 0 10px;
+    line-height: 1.25;
+  }
+  .verdict em { font-style: italic; color: var(--accent); }
+  .verdict .consensus { color: var(--ok); }
+
+  .stat-strip {
+    display: flex;
+    justify-content: center;
+    gap: 36px;
+    margin: 18px 0 8px;
+    flex-wrap: wrap;
+  }
+  .stat { text-align: center; }
+  .stat .s-val {
+    font-family: 'Fraunces', serif;
+    font-size: 34px;
+    font-weight: 350;
+    color: var(--brass);
+  }
+  .stat .s-lbl {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--cream-dim);
+  }
+
+  .stage-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-top: 30px;
+    flex-wrap: wrap;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--cream);
+    color: var(--ink);
+    padding: 10px 20px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    transition: transform 0.3s cubic-bezier(0.2, 1, 0.3, 1);
+    z-index: 10;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  footer {
+    margin-top: 40px;
+    font-size: 10px;
+    color: #55503f;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="wordmark">Table<em>Stakes</em></div>
+    <div class="conn" id="conn"><span class="dot"></span><span id="connText">offline</span></div>
+  </header>
+
+  <!-- ENTRY -->
+  <section class="entry" id="entry">
+    <h1>Throw down, <em>together.</em></h1>
+    <p class="lede">Peer-to-peer games for remote teams. No server, no accounts — share a link, and everyone's in the same room.</p>
+    <div class="field">
+      <label for="nameInput">Your name</label>
+      <input type="text" id="nameInput" maxlength="20" placeholder="e.g. Josh" autocomplete="off">
+    </div>
+    <div class="entry-actions">
+      <button class="btn-primary" id="createBtn">Start a room</button>
+      <span id="joinNote" class="joining-note" style="display:none"></span>
+    </div>
+  </section>
+
+  <!-- ROOM -->
+  <section class="room" id="room">
+    <div class="room-bar">
+      <div class="room-code">room / <strong id="roomCodeText"></strong></div>
+      <button class="btn-ghost" id="copyBtn">Copy invite link</button>
+    </div>
+
+    <div class="players" id="players"></div>
+
+    <div class="stage" id="stage"></div>
+
+    <footer>host-elected mesh · webrtc · no data leaves the circle</footer>
+  </section>
+</div>
+
+<div class="toast" id="toast">Link copied</div>
+
+<script type="module">
+import {joinRoom, selfId} from 'https://cdn.jsdelivr.net/npm/trystero@0.21.6/dist/trystero-torrent.min.js';
+
+/* ============ config & helpers ============ */
+const APP_ID = 'tablestakes-v1';
+const $ = id => document.getElementById(id);
+
+const WORDS_A = ['amber','brass','cedar','delta','ember','flint','grove','harbor','iron','juniper','koa','lumen','marble','noir','onyx','pine'];
+const WORDS_B = ['anvil','banner','circuit','dial','engine','fable','gambit','helm','index','jetty','kiln','ledger','meridian','needle','orbit','prism'];
+const makeCode = () =>
+  WORDS_A[Math.floor(Math.random()*WORDS_A.length)] + '-' +
+  WORDS_B[Math.floor(Math.random()*WORDS_B.length)] + '-' +
+  Math.floor(Math.random()*90+10);
+
+const RPS = {
+  rock:     {glyph:'✊', beats:'scissors'},
+  paper:    {glyph:'✋', beats:'rock'},
+  scissors: {glyph:'✌️', beats:'paper'},
+};
+
+/* ============ state ============ */
+let room = null;
+let myName = '';
+let hostId = null;                 // lowest peer id = host
+const names = {};                  // peerId -> name (includes self)
+let sendHello, sendPick, sendState;
+
+// host-authoritative game state (mirrored to peers via 'state')
+let G = {
+  phase: 'lobby',        // lobby | pick | reveal
+  game: null,            // rps | f2f
+  round: 0,
+  locked: [],            // peerIds locked in
+  results: null,         // peerId -> choice (only present in reveal)
+};
+const hostPicks = {};    // host-only: peerId -> choice
+let myPick = null;
+
+/* ============ boot ============ */
+const params = new URLSearchParams(location.search);
+let roomCode = params.get('room');
+
+if (roomCode) {
+  $('createBtn').textContent = 'Join room';
+  const note = $('joinNote');
+  note.style.display = 'inline';
+  note.textContent = `joining ${roomCode}`;
+}
+
+$('createBtn').addEventListener('click', enter);
+$('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') enter(); });
+$('copyBtn').addEventListener('click', async () => {
+  const url = `${location.origin}${location.pathname}?room=${roomCode}`;
+  try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); }
+  const t = $('toast');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 1800);
+});
+
+function enter() {
+  myName = $('nameInput').value.trim();
+  if (!myName) { $('nameInput').focus(); return; }
+  if (!roomCode) {
+    roomCode = makeCode();
+    history.replaceState(null, '', `?room=${roomCode}`);
+  }
+  names[selfId] = myName;
+  connect();
+  $('entry').classList.add('hidden');
+  $('room').classList.add('visible');
+  $('roomCodeText').textContent = roomCode;
+  render();
+}
+
+/* ============ networking ============ */
+function connect() {
+  room = joinRoom({appId: APP_ID}, roomCode);
+
+  [sendHello] = wire('hello', (name, peerId) => {
+    names[peerId] = String(name).slice(0, 20);
+    render();
+  });
+
+  [sendPick] = wire('pick', (choice, peerId) => {
+    if (!iAmHost()) return;               // only host records picks
+    hostRecordPick(peerId, choice);
+  });
+
+  [sendState] = wire('state', (state) => {
+    if (iAmHost()) return;                // host is the source of truth
+    G = state;
+    if (G.phase !== 'pick') myPick = null;
+    if (G.phase === 'pick' && !G.locked.includes(selfId)) {/* keep my un-locked pick */}
+    render();
+  });
+
+  room.onPeerJoin(peerId => {
+    sendHello(myName, peerId);
+    electHost();
+    if (iAmHost()) sendState(G, peerId);  // catch the newcomer up
+    setConn(true);
+    render();
+  });
+
+  room.onPeerLeave(peerId => {
+    delete names[peerId];
+    delete hostPicks[peerId];
+    const wasHost = peerId === hostId;
+    electHost();
+    if (iAmHost()) {
+      G.locked = G.locked.filter(id => id !== peerId);
+      if (wasHost && G.phase === 'pick') {
+        // host changed mid-round: keep it simple, restart the round
+        startRound(G.game);
+      } else {
+        hostCheckAllIn();
+        broadcast();
+      }
+    }
+    if (Object.keys(names).length === 1) setConn(false);
+    render();
+  });
+
+  electHost();
+  setConn(false); // until first peer arrives
+}
+
+function wire(name, handler) {
+  const [send, receive] = room.makeAction(name);
+  receive(handler);
+  return [send];
+}
+
+function playerIds() { return Object.keys(names).sort(); }
+function electHost() { hostId = playerIds()[0] ?? selfId; }
+function iAmHost() { return hostId === selfId; }
+function setConn(live) {
+  $('conn').classList.toggle('live', live);
+  $('connText').textContent = live ? `${playerIds().length} connected` : 'waiting for peers';
+}
+
+/* ============ host logic ============ */
+function broadcast() { if (room) sendState(G); render(); }
+
+function selectGame(game) {
+  if (!iAmHost()) return;
+  startRound(game);
+}
+
+function startRound(game) {
+  G = {phase: 'pick', game, round: G.round + 1, locked: [], results: null};
+  for (const k of Object.keys(hostPicks)) delete hostPicks[k];
+  myPick = null;
+  broadcast();
+}
+
+function hostRecordPick(peerId, choice) {
+  if (G.phase !== 'pick') return;
+  hostPicks[peerId] = choice;
+  if (!G.locked.includes(peerId)) G.locked = [...G.locked, peerId];
+  hostCheckAllIn();
+  broadcast();
+}
+
+function hostCheckAllIn() {
+  if (G.phase !== 'pick') return;
+  const ids = playerIds();
+  if (ids.length > 1 && ids.every(id => G.locked.includes(id))) {
+    G.phase = 'reveal';
+    G.results = {...hostPicks};
+  }
+}
+
+function backToLobby() {
+  if (!iAmHost()) return;
+  G = {...G, phase: 'lobby', game: null, locked: [], results: null};
+  broadcast();
+}
+
+/* ============ my actions ============ */
+function lockPick(choice) {
+  if (G.phase !== 'pick' || G.locked.includes(selfId)) return;
+  myPick = choice;
+  if (iAmHost()) hostRecordPick(selfId, choice);
+  else { sendPick(choice, hostId); render(); }
+}
+
+/* ============ rendering ============ */
+function render() {
+  renderPlayers();
+  const stage = $('stage');
+  if (G.phase === 'lobby') stage.innerHTML = viewLobby();
+  else if (G.phase === 'pick') stage.innerHTML = viewPick();
+  else stage.innerHTML = viewReveal();
+  bindStage();
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderPlayers() {
+  $('players').innerHTML = playerIds().map(id => `
+    <div class="player ${G.locked.includes(id) ? 'locked' : ''} ${id === selfId ? 'me' : ''}">
+      <span class="pip"></span>
+      <span>${esc(names[id] || '…')}</span>
+      ${id === hostId ? '<span class="tag">HOST</span>' : ''}
+    </div>`).join('');
+  setConn(playerIds().length > 1);
+}
+
+function viewLobby() {
+  if (iAmHost()) return `
+    <div class="stage-kicker">Round table</div>
+    <div class="stage-title">Pick a <em>game</em></div>
+    <p class="stage-sub">You're hosting. Everyone locks in blind — nothing is shown until all hands are in.</p>
+    <div class="game-cards">
+      <button class="game-card" data-game="rps">
+        <div class="gc-glyphs">✊ ✋ ✌️</div>
+        <div class="gc-name">Rock · Paper · Scissors</div>
+        <div class="gc-desc">The classic settler of disputes. Head-to-head or whole-team throwdown.</div>
+      </button>
+      <button class="game-card" data-game="f2f">
+        <div class="gc-glyphs">☝️ 🖐</div>
+        <div class="gc-name">Fist to Five</div>
+        <div class="gc-desc">Gauge the room. Zero is a hard no, five is full-throated support.</div>
+      </button>
+    </div>`;
+  return `
+    <div class="stage-kicker">Round table</div>
+    <div class="stage-title">Waiting on the <em>host</em></div>
+    <p class="waiting-host">${esc(names[hostId] || 'The host')} is choosing a game…</p>`;
+}
+
+function viewPick() {
+  const locked = G.locked.includes(selfId);
+  const remaining = playerIds().length - G.locked.length;
+
+  if (G.game === 'rps') {
+    return `
+      <div class="stage-kicker">Round ${G.round} — Rock Paper Scissors</div>
+      <div class="stage-title">Make your <em>throw</em></div>
+      <div class="choices">
+        ${Object.entries(RPS).map(([k, v]) => `
+          <button class="choice ${myPick === k ? 'selected' : ''}" data-pick="${k}" ${locked ? 'disabled' : ''}>
+            <span class="glyph">${v.glyph}</span>
+            <span class="lbl">${k}</span>
+          </button>`).join('')}
+      </div>
+      ${lockLine(locked, remaining)}`;
+  }
+  return `
+    <div class="stage-kicker">Round ${G.round} — Fist to Five</div>
+    <div class="stage-title">How do you <em>really</em> feel?</div>
+    <div class="choices">
+      ${[0,1,2,3,4,5].map(n => `
+        <button class="choice ${myPick === n ? 'selected' : ''}" data-pick="${n}" ${locked ? 'disabled' : ''}>
+          <span class="num">${n}</span>
+          <span class="lbl">${n === 0 ? 'fist' : n === 5 ? 'all in' : '&nbsp;'}</span>
+        </button>`).join('')}
+    </div>
+    ${lockLine(locked, remaining)}`;
+}
+
+function lockLine(locked, remaining) {
+  if (!locked) return `<div class="lock-note">Your pick locks in immediately — choose with intent.</div>`;
+  return `<div class="lock-note"><strong>Locked in.</strong> Waiting on ${remaining} player${remaining === 1 ? '' : 's'}…</div>`;
+}
+
+function viewReveal() {
+  const R = G.results || {};
+  const ids = Object.keys(R);
+
+  if (G.game === 'rps') return viewRevealRPS(R, ids);
+  return viewRevealF2F(R, ids);
+}
+
+function viewRevealRPS(R, ids) {
+  let verdict = '';
+  let winners = new Set();
+
+  const thrown = new Set(Object.values(R));
+  if (ids.length === 2) {
+    const [a, b] = ids;
+    if (R[a] === R[b]) verdict = `A <em>draw.</em> Run it back.`;
+    else {
+      const w = RPS[R[a]].beats === R[b] ? a : b;
+      winners.add(w);
+      const l = w === a ? b : a;
+      verdict = `<em>${esc(names[w] || 'Someone')}</em> takes it — ${R[w]} beats ${R[l]}.`;
+    }
+  } else if (thrown.size === 2) {
+    // group rules: with exactly two throws present, one side wins
+    const [t1, t2] = [...thrown];
+    const winning = RPS[t1].beats === t2 ? t1 : t2;
+    ids.forEach(id => { if (R[id] === winning) winners.add(id); });
+    verdict = `<em>${winning[0].toUpperCase() + winning.slice(1)}</em> wins the round.`;
+  } else if (thrown.size === 1) {
+    verdict = `Everyone threw the same. A <em>draw.</em>`;
+  } else {
+    verdict = `All three throws on the table — <em>stalemate.</em>`;
+  }
+
+  return `
+    <div class="stage-kicker">Round ${G.round} — the reveal</div>
+    <div class="verdict">${verdict}</div>
+    <div class="results">
+      ${ids.map((id, i) => `
+        <div class="result-row ${winners.has(id) ? 'winner' : ''}" style="animation-delay:${i * 90}ms">
+          <span class="r-glyph">${RPS[R[id]]?.glyph || '?'}</span>
+          <span class="r-name">${esc(names[id] || 'departed player')}</span>
+          <span class="r-choice">${esc(R[id])}${winners.has(id) ? ' · win' : ''}</span>
+        </div>`).join('')}
+    </div>
+    ${hostActions('Throw again')}`;
+}
+
+function viewRevealF2F(R, ids) {
+  const vals = ids.map(id => Number(R[id]));
+  const avg = vals.length ? (vals.reduce((s, v) => s + v, 0) / vals.length) : 0;
+  const spread = vals.length ? Math.max(...vals) - Math.min(...vals) : 0;
+  const consensus = spread <= 1;
+  const hardNo = vals.some(v => v === 0);
+
+  let verdict;
+  if (hardNo) verdict = `A fist on the table — <em>someone is blocking.</em> Talk it out.`;
+  else if (consensus && avg >= 4) verdict = `<span class="consensus">Strong consensus.</span> Ship it.`;
+  else if (consensus) verdict = `<span class="consensus">Aligned</span> — the room agrees.`;
+  else verdict = `The room is <em>split.</em> Hear from the ${Math.min(...vals)}s and the ${Math.max(...vals)}s.`;
+
+  const sorted = [...ids].sort((a, b) => Number(R[a]) - Number(R[b]));
+
+  return `
+    <div class="stage-kicker">Round ${G.round} — the reveal</div>
+    <div class="verdict">${verdict}</div>
+    <div class="stat-strip">
+      <div class="stat"><div class="s-val">${avg.toFixed(1)}</div><div class="s-lbl">average</div></div>
+      <div class="stat"><div class="s-val">${spread}</div><div class="s-lbl">spread</div></div>
+    </div>
+    <div class="results">
+      ${sorted.map((id, i) => `
+        <div class="result-row" style="animation-delay:${i * 90}ms">
+          <span class="r-num">${esc(R[id])}</span>
+          <span class="r-name">${esc(names[id] || 'departed player')}</span>
+          <span class="r-choice">${Number(R[id]) === 0 ? 'block' : Number(R[id]) >= 4 ? 'support' : 'reserved'}</span>
+        </div>`).join('')}
+    </div>
+    ${hostActions('Vote again')}`;
+}
+
+function hostActions(againLabel) {
+  if (!iAmHost()) return `<div class="lock-note">Waiting on ${esc(names[hostId] || 'the host')} for the next round…</div>`;
+  return `
+    <div class="stage-actions">
+      <button class="btn-primary" id="againBtn">${againLabel}</button>
+      <button class="btn-ghost" id="lobbyBtn">Change game</button>
+    </div>`;
+}
+
+function bindStage() {
+  document.querySelectorAll('[data-game]').forEach(b =>
+    b.addEventListener('click', () => selectGame(b.dataset.game)));
+  document.querySelectorAll('[data-pick]').forEach(b =>
+    b.addEventListener('click', () => {
+      const v = b.dataset.pick;
+      lockPick(G.game === 'f2f' ? Number(v) : v);
+    }));
+  const again = $('againBtn');
+  if (again) again.addEventListener('click', () => startRound(G.game));
+  const lobby = $('lobbyBtn');
+  if (lobby) lobby.addEventListener('click', backToLobby);
+}
+
+render();
+</script>
+</body>
+</html>
