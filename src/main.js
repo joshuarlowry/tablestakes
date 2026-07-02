@@ -1,4 +1,4 @@
-import { joinRoom, selfId } from '@trystero-p2p/torrent';
+import { joinRoom, selfId } from '@trystero-p2p/nostr';
 import './style.css';
 
 /* ============ config & helpers ============ */
@@ -78,6 +78,7 @@ function connect() {
 
   [sendHello] = wire('hello', (name, peerId) => {
     names[peerId] = String(name).slice(0, 20);
+    electHost();
     render();
   });
 
