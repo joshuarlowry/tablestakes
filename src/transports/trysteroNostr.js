@@ -1,14 +1,18 @@
 import {joinRoom, selfId} from '@trystero-p2p/nostr';
 
+// Public Nostr relays used only for WebRTC signaling/peer discovery. Some
+// community relays now require NIP-13 proof-of-work to publish (e.g. nos.lol),
+// which Trystero doesn't do and which silently breaks re-discovery on rejoin —
+// so this list favors major, PoW-free relays with community ones as backup.
 const NOSTR_RELAY_URLS = [
-  'wss://nos.lol',
+  'wss://relay.damus.io',
+  'wss://relay.primal.net',
+  'wss://relay.nostr.band',
+  'wss://nostr.mom',
   'wss://relay.nostr.place',
-  'wss://relay.libernet.app',
   'wss://relay.mostr.pub',
-  'wss://relay.mostro.network',
   'wss://purplerelay.com',
-  'wss://nostr-01.yakihonne.com',
-  'wss://relay.sigit.io',
+  'wss://relay.snort.social',
 ];
 
 const now = () => performance.now();

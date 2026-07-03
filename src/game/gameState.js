@@ -24,6 +24,10 @@ export function initialState() {
     reveals: {},    // round -> { peerId -> {pick, nonce} }
     forced: {},     // round -> true
     presenceSeq: {}, // peerId -> highest seq seen
+    // Facilitator is an explicit last-writer-wins register: creator seeds it,
+    // handoff/recovery bump the term. Higher term wins; ties broken by smaller
+    // holder id — so every peer converges without an election race.
+    facilitator: { holder: null, term: -1 },
   };
 }
 
@@ -79,6 +83,12 @@ export function reduce(state, event) {
       };
     case 'force-reveal':
       return { ...state, forced: { ...state.forced, [event.round]: true } };
+    case 'facilitator': {
+      const cur = state.facilitator;
+      const wins = event.term > cur.term ||
+        (event.term === cur.term && (cur.holder == null || event.holder < cur.holder));
+      return wins ? { ...state, facilitator: { holder: event.holder, term: event.term } } : state;
+    }
     case 'leave':
       return { ...state, departed: { ...state.departed, [event.from]: true } };
     default:
@@ -111,7 +121,11 @@ export function facilitatorOf(activeIds) {
 export function deriveView(state, selfId, activeIds, verified = {}) {
   const participants = [...new Set(activeIds)].filter(id => !state.departed[id]);
   participants.sort();
-  const facilitator = facilitatorOf(participants);
+  // Registered facilitator rules while its holder is live (picked/sticky/handoff/
+  // recovery); otherwise fall back to smallest live peer for display + gating.
+  const registered = state.facilitator.holder;
+  const registeredLive = registered && participants.includes(registered);
+  const facilitator = registeredLive ? registered : facilitatorOf(participants);
   const r = state.round;
   const commitsR = state.commits[r] || {};
   const verifiedR = verified[r] || {};

@@ -92,7 +92,7 @@ async function enter() {
   }
   $('createBtn').disabled = false;
 
-  client = createGameClient({ transport: port, name, autoVerify: true });
+  client = createGameClient({ transport: port, name, autoVerify: true, isCreator: createdRoom });
   client.onChange(render);
   client.join();
   heartbeatTimer = setInterval(() => client.heartbeat(), 5000);
@@ -198,6 +198,8 @@ function renderPlayers(view) {
       <span class="pip"></span>
       <span>${esc(view.names[id] || '…')}</span>
       ${id === view.facilitator ? '<span class="tag">FACILITATOR</span>' : ''}
+      ${view.isFacilitator && id !== client.self && id !== view.facilitator
+        ? `<button class="mini-action" data-facilitator="${esc(id)}">Make facilitator</button>` : ''}
     </div>`).join('');
 }
 
@@ -338,4 +340,6 @@ function bindStage(view) {
   if (lobby) lobby.addEventListener('click', () => client.backToLobby());
   const force = $('forceBtn');
   if (force) force.addEventListener('click', () => client.forceReveal());
+  document.querySelectorAll('[data-facilitator]').forEach(b =>
+    b.addEventListener('click', () => client.handOff(b.dataset.facilitator)));
 }

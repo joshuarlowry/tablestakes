@@ -8,7 +8,7 @@
  * Timers are NOT owned here — the caller drives `heartbeat()` and `tick(now)` —
  * keeping the controller deterministic and testable.
  */
-import { reduce, initialState, deriveView } from './gameState.js';
+import { reduce, initialState, deriveView, facilitatorOf } from './gameState.js';
 import { createGossip } from '../net/gossip.js';
 import { commit as makeCommit, verify, sha256Hex } from './commitReveal.js';
 
@@ -28,6 +28,7 @@ export function createGameClient({
   randomNonce = defaultNonce,
   livenessMs = LIVENESS_MS,
   autoVerify = false,
+  isCreator = false,
 }) {
   const self = transport.localPeerId;
   let state = initialState();
@@ -71,6 +72,7 @@ export function createGameClient({
       pendingReveals.push({ round: ev.round, from: ev.from, pick: ev.pick, nonce: ev.nonce });
     }
     maybeAutoReveal();
+    maybeRecoverFacilitator();
     notify();
     // Re-verify after ANY event: a reveal may have arrived before its commit,
     // so a later commit needs to retrigger verification of a still-pending reveal.
@@ -131,9 +133,33 @@ export function createGameClient({
     return deriveView(state, self, activeIds(), verified);
   }
 
+  /* ---- facilitator register ---- */
+  function claimFacilitator(holder, term) {
+    publish({ id: `fac:${term}:${holder}`, type: 'facilitator', from: self, holder, term });
+  }
+  // Recover a lost facilitator: if the registered holder is gone, the smallest
+  // live peer re-claims (term+1). Termed register → converges, no cycle. A null
+  // holder (no explicit facilitator ever set) is left to the deterministic
+  // fallback in deriveView, so this never races the creator's initial seed.
+  function maybeRecoverFacilitator() {
+    const reg = state.facilitator.holder;
+    if (reg == null) return;
+    const parts = participants();
+    if (!parts.length || parts.includes(reg)) return;
+    if (facilitatorOf(parts) === self && reg !== self) {
+      claimFacilitator(self, state.facilitator.term + 1);
+    }
+  }
+  function handOff(toId) {
+    if (!getView().isFacilitator || toId === self) return;
+    if (!state.names[toId] || state.departed[toId]) return;
+    claimFacilitator(toId, state.facilitator.term + 1);
+  }
+
   /* ---- driven by the caller ---- */
   function join() {
-    heartbeat();          // announce presence
+    heartbeat();                          // announce presence
+    if (isCreator) claimFacilitator(self, 0);  // creator is facilitator by default
   }
   function heartbeat() {
     lastHeard.set(self, now());
@@ -141,8 +167,10 @@ export function createGameClient({
     presenceSeq += 1;
   }
   function tick() {
-    // recompute (liveness may have dropped a stuck peer → unblock reveal)
+    // recompute (liveness may have dropped a stuck peer → unblock reveal or
+    // trigger facilitator recovery)
     maybeAutoReveal();
+    maybeRecoverFacilitator();
     if (autoVerify && pendingReveals.length) runVerify();
     notify();
   }
@@ -188,7 +216,7 @@ export function createGameClient({
   return {
     self,
     join, heartbeat, tick,
-    lock, selectGame, backToLobby, forceReveal, leave,
+    lock, selectGame, backToLobby, forceReveal, leave, handOff,
     processVerifications, getView, onChange,
     _debug: () => ({ state, verified }),
   };
