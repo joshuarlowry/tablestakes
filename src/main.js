@@ -25,7 +25,7 @@ let hostId = null;                 // room creator by default, transferable by h
 const names = {};                  // peerId -> name (includes self)
 const departed = new Set();
 const directPeers = new Set();
-let sendHello, sendPick, sendState, sendHost;
+let sendHello, sendPick, sendState, sendHost, sendPresence;
 let hostRecoveryTimer = null;
 
 // host-authoritative game state (mirrored to peers via 'state')
@@ -165,16 +165,31 @@ function connect() {
     render();
   });
 
+  sendPresence = transport.makeAction('presence', (message, peerId) => {
+    const report = normalizePresence(message);
+    if (!report) return;
+    names[peerId] = report.name;
+    applyRoster(report.roster);
+    acceptHost(report.hostId);
+    if (iAmHost()) {
+      maybeTransferToBetterHost(peerId, report);
+      if (iAmHost()) broadcast();
+    }
+    render();
+  });
+
+  setInterval(sendPresenceSnapshot, 5000);
   setConn(false); // until first peer arrives
 }
 
 function handlePeerJoin(peerId) {
-  if (!sendHello || !sendState || !sendHost) {
+  if (!sendHello || !sendState || !sendHost || !sendPresence) {
     setTimeout(() => handlePeerJoin(peerId), 0);
     return;
   }
   directPeers.add(peerId);
   sendHello(makeHello(), peerId);
+  sendPresenceSnapshot(peerId);
   if (iAmHost()) sendState(makeStateMessage(), peerId);  // catch the newcomer up
   scheduleHostRecovery();
   setConn(true);
@@ -241,6 +256,42 @@ function applyRoster(roster) {
     if (!departed.has(id)) names[id] = String(name).slice(0, 20) || 'peer';
   }
   names[localPeerId] = myName;
+}
+function makePresence() {
+  return {
+    name: myName,
+    hostId,
+    roster: names,
+    directPeerIds: [...directPeers],
+  };
+}
+function normalizePresence(message) {
+  if (!message || typeof message !== 'object') return null;
+  return {
+    name: String(message.name || '').slice(0, 20) || 'peer',
+    hostId: typeof message.hostId === 'string' ? message.hostId : null,
+    roster: message.roster && typeof message.roster === 'object' ? message.roster : null,
+    directPeerIds: Array.isArray(message.directPeerIds)
+      ? message.directPeerIds.filter(id => typeof id === 'string')
+      : [],
+  };
+}
+function sendPresenceSnapshot(target) {
+  if (!sendPresence || !localPeerId) return;
+  sendPresence(makePresence(), target);
+}
+function maybeTransferToBetterHost(peerId, report) {
+  if (G.phase !== 'lobby' || !directPeers.has(peerId) || peerId === hostId) return;
+  const reportedRosterSize = Object.keys(report.roster || {}).length;
+  const currentRosterSize = connectedPeerIds().length;
+  const reportedDirectSize = report.directPeerIds.length + 1;
+  const currentDirectSize = directPeers.size + 1;
+  if (
+    reportedRosterSize > currentRosterSize ||
+    (reportedRosterSize === currentRosterSize && reportedDirectSize > currentDirectSize)
+  ) {
+    transferHost(peerId);
+  }
 }
 function acceptHost(candidateHostId, replace = false) {
   if (!candidateHostId || (hostId && !replace)) return;
