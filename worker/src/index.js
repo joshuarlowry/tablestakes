@@ -61,8 +61,23 @@ async function mintIceServers(env) {
   return data.iceServers;
 }
 
+function roomOriginAllowed(request, env) {
+  const origin = request.headers.get('Origin') || '';
+  return !origin || allowedOrigins(env).has(origin); // no Origin header = non-browser/dev client
+}
+
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (url.pathname.startsWith('/room/')) {
+      if (!roomOriginAllowed(request, env)) return new Response('Forbidden origin', { status: 403 });
+      const roomId = decodeURIComponent(url.pathname.slice('/room/'.length));
+      if (!roomId) return new Response('Missing room id', { status: 400 });
+      const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+      return stub.fetch(request);
+    }
+
     const origin = request.headers.get('Origin') || '';
     const cors = corsHeaders(origin, env);
 
@@ -97,3 +112,5 @@ function jsonResponse(body, status, headers) {
     headers: { ...headers, 'Content-Type': 'application/json' },
   });
 }
+
+export { RoomDO } from './room.js';

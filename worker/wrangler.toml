@@ -13,24 +13,18 @@ CREDENTIAL_TTL = "86400"
 #   wrangler secret put TURN_KEY_API_TOKEN
 # (CI sets these automatically from GitHub secrets — see the deploy workflow.)
 
-# Durable Objects confirmed provisionable on this account/token via a smoke
-# test (2026-07-03). Two gotchas learned from it, both relevant when building
-# the real room-relay Durable Object:
-#   1. Free plan requires `new_sqlite_classes`, not `new_classes`, to create one.
-#   2. Once a class has a live namespace, you can't just drop its binding —
-#      Cloudflare requires an explicit `deleted_classes` migration (below) to
-#      remove it, otherwise deploys fail with error 10064.
+# Room relay Durable Object — one instance per game room, gossips opaque `evt`
+# envelopes between connected clients (see src/room.js). Free plan requires
+# `new_sqlite_classes` (not `new_classes`); a prior smoke-tested-then-deleted
+# class already consumed migration tags v1/v2, hence starting at v3 here.
+[[durable_objects.bindings]]
+name = "ROOM_DO"
+class_name = "RoomDO"
+
 [[migrations]]
 tag = "v2"
 deleted_classes = ["RoomDO"]
 
-# Re-add a binding + a `new_sqlite_classes` migration here when building the
-# real room-relay Durable Object:
-#
-# [[durable_objects.bindings]]
-# name = "ROOM_DO"
-# class_name = "RoomDO"
-#
-# [[migrations]]
-# tag = "v3"
-# new_sqlite_classes = ["RoomDO"]
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["RoomDO"]

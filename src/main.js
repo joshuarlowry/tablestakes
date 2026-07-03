@@ -1,17 +1,14 @@
-import { createSecureNostrInvite, createTrysteroGossipPort } from './transports/trysteroNostr.js';
-import { buildRtcConfig } from './transports/turnConfig.js';
+import { createRoomInvite, createWsRoomTransport } from './transports/wsRoom.js';
 import { createGameClient } from './game/gameClient.js';
 import { RPS } from './game/rules.js';
 import './style.css';
 
 /* ============ config & helpers ============ */
-const APP_NAMESPACE = 'tablestakes-v1';
+const RELAY_URL = import.meta.env.VITE_RELAY_URL || 'wss://tablestakes-turn.joshuarlowry.workers.dev';
 const $ = id => document.getElementById(id);
 const hashParams = () => new URLSearchParams(location.hash.replace(/^#/, ''));
 const inviteUrl = () =>
   `${location.origin}${location.pathname}?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(inviteToken)}`;
-const readSetting = (key, fallback = '') => localStorage.getItem(`tablestakes:${key}`) ?? fallback;
-const writeSetting = (key, value) => localStorage.setItem(`tablestakes:${key}`, value);
 
 const esc = s => String(s).replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33,8 +30,6 @@ createdRoom = !roomCode;
 inviteToken = hashParams().get('token') || params.get('token') || '';
 
 if (inviteToken) $('inviteTokenInput').value = inviteToken;
-$('useTurnInput').checked = params.get('turn') === '0' ? false : readSetting('useTurn', '1') !== '0';
-$('forceRelayInput').checked = params.get('relay') === '1' ? true : readSetting('forceRelay', '0') === '1';
 
 if (roomCode) {
   $('createBtn').textContent = 'Join room';
@@ -58,11 +53,9 @@ $('leaveBtn').addEventListener('click', leaveRoom);
 async function enter() {
   const name = $('nameInput').value.trim();
   if (!name) { $('nameInput').focus(); return; }
-  writeSetting('useTurn', $('useTurnInput').checked ? '1' : '0');
-  writeSetting('forceRelay', $('forceRelayInput').checked ? '1' : '0');
 
   if (!roomCode) {
-    const invite = createSecureNostrInvite();
+    const invite = createRoomInvite();
     roomCode = invite.roomId;
     inviteToken = invite.inviteToken;
     $('inviteTokenInput').value = inviteToken;
@@ -74,22 +67,14 @@ async function enter() {
   }
 
   $('createBtn').disabled = true;
-  let port;
-  try {
-    const rtcConfig = await makeRtcConfig();
-    port = createTrysteroGossipPort({
-      roomId: roomCode,
-      inviteToken,
-      appNamespace: APP_NAMESPACE,
-      rtcConfig,
-      onHealth: renderHealth,
-      onError: renderTransportError,
-    });
-  } catch (error) {
-    $('transportError').textContent = error.message;
-    $('createBtn').disabled = false;
-    return;
-  }
+  const port = createWsRoomTransport({
+    wsUrl: RELAY_URL,
+    roomId: roomCode,
+    inviteToken,
+    name,
+    onHealth: renderHealth,
+    onError: renderTransportError,
+  });
   $('createBtn').disabled = false;
 
   client = createGameClient({ transport: port, name, autoVerify: true, isCreator: createdRoom });
@@ -103,18 +88,6 @@ async function enter() {
   $('roomCodeText').textContent = roomCode;
   syncInviteLink();
   render(client.getView());
-}
-
-async function makeRtcConfig() {
-  const useTurn = $('useTurnInput').checked;
-  const forceRelay = $('forceRelayInput').checked;
-  if (!useTurn) return undefined;
-  try {
-    return await buildRtcConfig({ useTurn, forceRelay });
-  } catch (error) {
-    $('transportError').textContent = `Relay unavailable (${error.message}). Connecting directly.`;
-    return undefined;
-  }
 }
 
 function syncInviteLink() {
@@ -146,7 +119,6 @@ function leaveRoom() {
   $('transportStatus').textContent = 'idle';
   $('peerCount').textContent = '0';
   $('reconnectAttempts').textContent = '0';
-  $('healthPeers').innerHTML = '<div class="health-empty">No remote peers yet.</div>';
   $('players').innerHTML = '';
   $('stage').innerHTML = '';
   setConn(false, 0);
@@ -161,19 +133,6 @@ function renderHealth(health) {
   $('transportStatus').textContent = health.status;
   $('peerCount').textContent = String(health.peerCount);
   $('reconnectAttempts').textContent = String(health.reconnectAttempts);
-  $('healthPeers').innerHTML = health.peers.length
-    ? health.peers.map(peer => `
-      <div class="health-peer">
-        <span class="mono">${esc(shortId(peer.peerId))}</span>
-        <span>${peer.joinMs == null ? 'joining' : `${peer.joinMs}ms join`}</span>
-        <span>${peer.lastRttMs == null ? 'rtt --' : `${peer.lastRttMs}ms rtt`}</span>
-        <span>${peer.authenticated ? 'auth ok' : 'auth pending'}</span>
-        <span>${peer.disconnects} drop${peer.disconnects === 1 ? '' : 's'}</span>
-      </div>`).join('')
-    : '<div class="health-empty">No remote peers yet.</div>';
-}
-function shortId(peerId) {
-  return `${String(peerId).slice(0, 6)}...${String(peerId).slice(-4)}`;
 }
 function setConn(live, count) {
   $('conn').classList.toggle('live', live);

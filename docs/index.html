@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
-  <script type="module" crossorigin src="/tablestakes/assets/index-ZhpwUo0v.js"></script>
+  <script type="module" crossorigin src="/tablestakes/assets/index-BLS3DvQb.js"></script>
   <link rel="stylesheet" crossorigin href="/tablestakes/assets/index-39t-2fp9.css">
 </head>
 <body>
@@ -20,7 +20,7 @@
   <!-- ENTRY -->
   <section class="entry" id="entry">
     <h1>Throw down, <em>together.</em></h1>
-    <p class="lede">Peer-to-peer games for remote teams. Nostr discovers peers; WebRTC carries the game traffic after invite-token authentication.</p>
+    <p class="lede">Quick blind-vote games for a team on a call. Share a link, everyone's in within seconds — picks stay hidden until the whole room has locked in.</p>
     <div class="field">
       <label for="nameInput">Your name</label>
       <input type="text" id="nameInput" maxlength="20" placeholder="e.g. Josh" autocomplete="off">
@@ -30,14 +30,6 @@
         <label for="inviteTokenInput">Invitation token</label>
         <input type="text" id="inviteTokenInput" placeholder="included automatically in invite links" autocomplete="off" spellcheck="false">
       </div>
-      <label class="check-row" for="useTurnInput">
-        <input type="checkbox" id="useTurnInput">
-        <span>Use TURN relay</span>
-      </label>
-      <label class="check-row" for="forceRelayInput">
-        <input type="checkbox" id="forceRelayInput">
-        <span>Force relay only</span>
-      </label>
       <div class="transport-error" id="transportError"></div>
     </div>
     <div class="entry-actions">
@@ -83,13 +75,10 @@
           <strong id="reconnectAttempts">0</strong>
         </div>
       </div>
-      <div class="health-peers" id="healthPeers">
-        <div class="health-empty">No remote peers yet.</div>
-      </div>
       <div class="health-errors" id="healthErrors"></div>
     </section>
 
-    <footer>trystero transport · nostr discovery · authenticated webrtc data channels</footer>
+    <footer>relayed via cloudflare · invite-token gated · blind until everyone's locked in</footer>
   </section>
 </div>
 
