@@ -64,6 +64,7 @@ $('copyBtn').addEventListener('click', async () => {
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 1800);
 });
+$('leaveBtn').addEventListener('click', leaveRoom);
 
 function enter() {
   myName = $('nameInput').value.trim();
@@ -99,6 +100,45 @@ function enter() {
 function syncInviteLink() {
   if (!roomCode || !inviteToken) return;
   $('inviteLinkInput').value = inviteUrl();
+}
+
+function leaveRoom() {
+  transport?.leave();
+  transport = null;
+  localPeerId = null;
+  hostId = null;
+  sendHello = null;
+  sendPick = null;
+  sendState = null;
+  sendHost = null;
+  sendPresence = null;
+  clearHostRecovery();
+  directPeers.clear();
+  departed.clear();
+  for (const id of Object.keys(names)) delete names[id];
+  for (const id of Object.keys(hostPicks)) delete hostPicks[id];
+  G = {phase: 'lobby', game: null, round: 0, locked: [], results: null};
+  myPick = null;
+  roomCode = null;
+  inviteToken = '';
+  history.replaceState(null, '', location.pathname);
+  $('room').classList.remove('visible');
+  $('entry').classList.remove('hidden');
+  $('createBtn').textContent = 'Start a room';
+  $('joinNote').style.display = 'none';
+  $('joinNote').textContent = '';
+  $('roomCodeText').textContent = '';
+  $('inviteLinkInput').value = '';
+  $('inviteTokenInput').value = '';
+  $('transportError').textContent = '';
+  $('healthErrors').textContent = '';
+  $('localPeerId').textContent = 'pending';
+  $('transportStatus').textContent = 'idle';
+  $('peerCount').textContent = '0';
+  $('reconnectAttempts').textContent = '0';
+  $('healthPeers').innerHTML = '<div class="health-empty">No remote peers yet.</div>';
+  setConn(false);
+  render();
 }
 
 /* ============ networking ============ */
@@ -324,7 +364,9 @@ function scheduleHostRecovery() {
 function iAmHost() { return hostId === localPeerId; }
 function setConn(live) {
   $('conn').classList.toggle('live', live);
-  $('connText').textContent = live ? `${connectedPeerIds().length} connected` : 'waiting for peers';
+  $('connText').textContent = live
+    ? `${connectedPeerIds().length} connected`
+    : transport ? 'waiting for peers' : 'offline';
 }
 
 function renderTransportError(error) {

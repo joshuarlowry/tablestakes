@@ -211,6 +211,12 @@ button {
   font-weight: 600;
   letter-spacing: 0.08em;
 }
+.room-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 
 .invite-link-row {
   margin: -12px 0 30px;
