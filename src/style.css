@@ -142,6 +142,24 @@ input[type="text"]::placeholder { color: #55503f; }
 }
 .transport-config .field { margin-bottom: 14px; }
 .transport-config .field:last-of-type { margin-bottom: 0; }
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  color: var(--cream-dim);
+  cursor: pointer;
+}
+.check-row input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+.check-row span {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 .transport-error,
 .health-errors {
   min-height: 18px;

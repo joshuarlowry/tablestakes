@@ -10,6 +10,20 @@ const $ = id => document.getElementById(id);
 const hashParams = () => new URLSearchParams(location.hash.replace(/^#/, ''));
 const inviteUrl = () =>
   `${location.origin}${location.pathname}?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(inviteToken)}`;
+const DEFAULT_TURN_CONFIG = [{
+  urls: [
+    'turn:openrelay.metered.ca:80',
+    'turn:openrelay.metered.ca:443',
+    'turn:openrelay.metered.ca:443?transport=tcp',
+    'turns:openrelay.metered.ca:443',
+  ],
+  username: 'openrelayproject',
+  credential: 'openrelayproject',
+}];
+const readSetting = (key, fallback = '') =>
+  localStorage.getItem(`tablestakes:${key}`) ?? fallback;
+const writeSetting = (key, value) =>
+  localStorage.setItem(`tablestakes:${key}`, value);
 
 const RPS = {
   rock:     {glyph:'✊', beats:'scissors'},
@@ -46,6 +60,9 @@ const createdRoom = !roomCode;
 let inviteToken = hashParams().get('token') || params.get('token') || '';
 
 if (inviteToken) $('inviteTokenInput').value = inviteToken;
+$('useTurnInput').checked = params.get('turn') === '0'
+  ? false
+  : readSetting('useTurn', '1') !== '0';
 
 if (roomCode) {
   $('createBtn').textContent = 'Join room';
@@ -69,6 +86,7 @@ $('leaveBtn').addEventListener('click', leaveRoom);
 function enter() {
   myName = $('nameInput').value.trim();
   if (!myName) { $('nameInput').focus(); return; }
+  writeSetting('useTurn', $('useTurnInput').checked ? '1' : '0');
   if (!roomCode) {
     const invite = createSecureNostrInvite();
     roomCode = invite.roomId;
@@ -147,6 +165,7 @@ function connect() {
     roomId: roomCode,
     inviteToken,
     appNamespace: APP_NAMESPACE,
+    turnConfig: $('useTurnInput').checked ? DEFAULT_TURN_CONFIG : [],
     onPeerJoin: handlePeerJoin,
     onPeerLeave: handlePeerLeave,
     onHealth: renderHealth,
