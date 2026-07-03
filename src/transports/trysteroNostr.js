@@ -49,7 +49,7 @@ export function createTrysteroNostrTransport({
   roomId,
   inviteToken,
   appNamespace,
-  turnConfig = [],
+  rtcConfig,
   onPeerJoin,
   onPeerLeave,
   onHealth,
@@ -178,7 +178,7 @@ export function createTrysteroNostrTransport({
         manualReconnection: true,
         redundancy: 4,
       },
-      turnConfig,
+      rtcConfig,
     },
     roomId,
     {

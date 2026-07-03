@@ -10,16 +10,20 @@ const $ = id => document.getElementById(id);
 const hashParams = () => new URLSearchParams(location.hash.replace(/^#/, ''));
 const inviteUrl = () =>
   `${location.origin}${location.pathname}?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(inviteToken)}`;
-const DEFAULT_TURN_CONFIG = [{
-  urls: [
-    'turn:openrelay.metered.ca:80',
-    'turn:openrelay.metered.ca:443',
-    'turn:openrelay.metered.ca:443?transport=tcp',
-    'turns:openrelay.metered.ca:443',
-  ],
-  username: 'openrelayproject',
-  credential: 'openrelayproject',
-}];
+const OPEN_RELAY_ICE_SERVERS = [
+  {urls: 'stun:openrelay.metered.ca:80'},
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:80?transport=tcp',
+      'turn:openrelay.metered.ca:443',
+      'turn:openrelay.metered.ca:443?transport=tcp',
+      'turns:openrelay.metered.ca:443',
+    ],
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+];
 const readSetting = (key, fallback = '') =>
   localStorage.getItem(`tablestakes:${key}`) ?? fallback;
 const writeSetting = (key, value) =>
@@ -63,6 +67,9 @@ if (inviteToken) $('inviteTokenInput').value = inviteToken;
 $('useTurnInput').checked = params.get('turn') === '0'
   ? false
   : readSetting('useTurn', '1') !== '0';
+$('forceRelayInput').checked = params.get('relay') === '1'
+  ? true
+  : readSetting('forceRelay', '0') === '1';
 
 if (roomCode) {
   $('createBtn').textContent = 'Join room';
@@ -87,6 +94,7 @@ function enter() {
   myName = $('nameInput').value.trim();
   if (!myName) { $('nameInput').focus(); return; }
   writeSetting('useTurn', $('useTurnInput').checked ? '1' : '0');
+  writeSetting('forceRelay', $('forceRelayInput').checked ? '1' : '0');
   if (!roomCode) {
     const invite = createSecureNostrInvite();
     roomCode = invite.roomId;
@@ -165,7 +173,7 @@ function connect() {
     roomId: roomCode,
     inviteToken,
     appNamespace: APP_NAMESPACE,
-    turnConfig: $('useTurnInput').checked ? DEFAULT_TURN_CONFIG : [],
+    rtcConfig: makeRtcConfig(),
     onPeerJoin: handlePeerJoin,
     onPeerLeave: handlePeerLeave,
     onHealth: renderHealth,
@@ -239,6 +247,14 @@ function connect() {
 
   setInterval(sendPresenceSnapshot, 5000);
   setConn(false); // until first peer arrives
+}
+
+function makeRtcConfig() {
+  if (!$('useTurnInput').checked) return undefined;
+  return {
+    iceServers: OPEN_RELAY_ICE_SERVERS,
+    iceTransportPolicy: $('forceRelayInput').checked ? 'relay' : 'all',
+  };
 }
 
 function handlePeerJoin(peerId) {
