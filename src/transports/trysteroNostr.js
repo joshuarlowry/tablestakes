@@ -56,6 +56,49 @@ export function createSecureNostrInvite() {
   };
 }
 
+/**
+ * Adapts the Trystero transport to the gossip transport port
+ * ({ localPeerId, publish, publishTo, onEvent, onPeerJoin, onPeerLeave }) that
+ * `gossip.js` / `gameClient.js` consume. All game traffic rides one `evt`
+ * action; peer join/leave are fanned out to multiple subscribers. Auth, TURN,
+ * and health/error reporting are unchanged.
+ */
+export function createTrysteroGossipPort({
+  roomId,
+  inviteToken,
+  appNamespace,
+  rtcConfig,
+  onHealth,
+  onError,
+}) {
+  const joinCbs = [];
+  const leaveCbs = [];
+  const transport = createTrysteroNostrTransport({
+    roomId,
+    inviteToken,
+    appNamespace,
+    rtcConfig,
+    onPeerJoin: peerId => joinCbs.forEach(cb => cb(peerId)),
+    onPeerLeave: peerId => leaveCbs.forEach(cb => cb(peerId)),
+    onHealth,
+    onError,
+  });
+
+  let eventHandler = () => {};
+  const send = transport.makeAction('evt', (payload, peerId) => eventHandler(payload, peerId));
+
+  return {
+    localPeerId: transport.localPeerId,
+    publish: wire => send(wire),
+    publishTo: (peerId, wire) => send(wire, peerId),
+    onEvent: cb => { eventHandler = cb; },
+    onPeerJoin: cb => joinCbs.push(cb),
+    onPeerLeave: cb => leaveCbs.push(cb),
+    getPeerIds: transport.getPeerIds,
+    leave: transport.leave,
+  };
+}
+
 export function createTrysteroNostrTransport({
   roomId,
   inviteToken,

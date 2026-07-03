@@ -1,8 +1,7 @@
-import {
-  createSecureNostrInvite,
-  createTrysteroNostrTransport,
-} from './transports/trysteroNostr.js';
-import {buildRtcConfig} from './transports/turnConfig.js';
+import { createSecureNostrInvite, createTrysteroGossipPort } from './transports/trysteroNostr.js';
+import { buildRtcConfig } from './transports/turnConfig.js';
+import { createGameClient } from './game/gameClient.js';
+import { RPS } from './game/rules.js';
 import './style.css';
 
 /* ============ config & helpers ============ */
@@ -11,52 +10,31 @@ const $ = id => document.getElementById(id);
 const hashParams = () => new URLSearchParams(location.hash.replace(/^#/, ''));
 const inviteUrl = () =>
   `${location.origin}${location.pathname}?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(inviteToken)}`;
-const readSetting = (key, fallback = '') =>
-  localStorage.getItem(`tablestakes:${key}`) ?? fallback;
-const writeSetting = (key, value) =>
-  localStorage.setItem(`tablestakes:${key}`, value);
+const readSetting = (key, fallback = '') => localStorage.getItem(`tablestakes:${key}`) ?? fallback;
+const writeSetting = (key, value) => localStorage.setItem(`tablestakes:${key}`, value);
 
-const RPS = {
-  rock:     {glyph:'✊', beats:'scissors'},
-  paper:    {glyph:'✋', beats:'rock'},
-  scissors: {glyph:'✌️', beats:'paper'},
-};
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /* ============ state ============ */
-let transport = null;
-let localPeerId = null;
-let myName = '';
-let hostId = null;                 // room creator by default, transferable by host
-const names = {};                  // peerId -> name (includes self)
-const departed = new Set();
-const directPeers = new Set();
-let sendHello, sendPick, sendState, sendHost, sendPresence;
-let hostRecoveryTimer = null;
-
-// host-authoritative game state (mirrored to peers via 'state')
-let G = {
-  phase: 'lobby',        // lobby | pick | reveal
-  game: null,            // rps | f2f
-  round: 0,
-  locked: [],            // peerIds locked in
-  results: null,         // peerId -> choice (only present in reveal)
-};
-const hostPicks = {};    // host-only: peerId -> choice
-let myPick = null;
+let client = null;
+let roomCode = null;
+let inviteToken = '';
+let createdRoom = false;
+let myChoice = null;
+let lastRound = -1;
+let heartbeatTimer = null;
+let tickTimer = null;
 
 /* ============ boot ============ */
 const params = new URLSearchParams(location.search);
-let roomCode = params.get('room');
-const createdRoom = !roomCode;
-let inviteToken = hashParams().get('token') || params.get('token') || '';
+roomCode = params.get('room');
+createdRoom = !roomCode;
+inviteToken = hashParams().get('token') || params.get('token') || '';
 
 if (inviteToken) $('inviteTokenInput').value = inviteToken;
-$('useTurnInput').checked = params.get('turn') === '0'
-  ? false
-  : readSetting('useTurn', '1') !== '0';
-$('forceRelayInput').checked = params.get('relay') === '1'
-  ? true
-  : readSetting('forceRelay', '0') === '1';
+$('useTurnInput').checked = params.get('turn') === '0' ? false : readSetting('useTurn', '1') !== '0';
+$('forceRelayInput').checked = params.get('relay') === '1' ? true : readSetting('forceRelay', '0') === '1';
 
 if (roomCode) {
   $('createBtn').textContent = 'Join room';
@@ -78,10 +56,11 @@ $('copyBtn').addEventListener('click', async () => {
 $('leaveBtn').addEventListener('click', leaveRoom);
 
 async function enter() {
-  myName = $('nameInput').value.trim();
-  if (!myName) { $('nameInput').focus(); return; }
+  const name = $('nameInput').value.trim();
+  if (!name) { $('nameInput').focus(); return; }
   writeSetting('useTurn', $('useTurnInput').checked ? '1' : '0');
   writeSetting('forceRelay', $('forceRelayInput').checked ? '1' : '0');
+
   if (!roomCode) {
     const invite = createSecureNostrInvite();
     roomCode = invite.roomId;
@@ -90,27 +69,52 @@ async function enter() {
     history.replaceState(null, '', inviteUrl());
   } else {
     inviteToken = $('inviteTokenInput').value.trim() || inviteToken;
-    if (!inviteToken) {
-      $('transportError').textContent = 'This room needs an invitation token.';
-      return;
-    }
+    if (!inviteToken) { $('transportError').textContent = 'This room needs an invitation token.'; return; }
     history.replaceState(null, '', inviteUrl());
   }
+
   $('createBtn').disabled = true;
+  let port;
   try {
-    await connect();
+    const rtcConfig = await makeRtcConfig();
+    port = createTrysteroGossipPort({
+      roomId: roomCode,
+      inviteToken,
+      appNamespace: APP_NAMESPACE,
+      rtcConfig,
+      onHealth: renderHealth,
+      onError: renderTransportError,
+    });
   } catch (error) {
     $('transportError').textContent = error.message;
     $('createBtn').disabled = false;
     return;
   }
   $('createBtn').disabled = false;
-  names[localPeerId] = myName;
+
+  client = createGameClient({ transport: port, name, autoVerify: true });
+  client.onChange(render);
+  client.join();
+  heartbeatTimer = setInterval(() => client.heartbeat(), 5000);
+  tickTimer = setInterval(() => client.tick(Date.now()), 2000);
+
   $('entry').classList.add('hidden');
   $('room').classList.add('visible');
   $('roomCodeText').textContent = roomCode;
   syncInviteLink();
-  render();
+  render(client.getView());
+}
+
+async function makeRtcConfig() {
+  const useTurn = $('useTurnInput').checked;
+  const forceRelay = $('forceRelayInput').checked;
+  if (!useTurn) return undefined;
+  try {
+    return await buildRtcConfig({ useTurn, forceRelay });
+  } catch (error) {
+    $('transportError').textContent = `Relay unavailable (${error.message}). Connecting directly.`;
+    return undefined;
+  }
 }
 
 function syncInviteLink() {
@@ -119,24 +123,14 @@ function syncInviteLink() {
 }
 
 function leaveRoom() {
-  transport?.leave();
-  transport = null;
-  localPeerId = null;
-  hostId = null;
-  sendHello = null;
-  sendPick = null;
-  sendState = null;
-  sendHost = null;
-  sendPresence = null;
-  clearHostRecovery();
-  directPeers.clear();
-  departed.clear();
-  for (const id of Object.keys(names)) delete names[id];
-  for (const id of Object.keys(hostPicks)) delete hostPicks[id];
-  G = {phase: 'lobby', game: null, round: 0, locked: [], results: null};
-  myPick = null;
+  client?.leave();
+  client = null;
+  clearInterval(heartbeatTimer);
+  clearInterval(tickTimer);
   roomCode = null;
   inviteToken = '';
+  myChoice = null;
+  lastRound = -1;
   history.replaceState(null, '', location.pathname);
   $('room').classList.remove('visible');
   $('entry').classList.remove('hidden');
@@ -153,259 +147,15 @@ function leaveRoom() {
   $('peerCount').textContent = '0';
   $('reconnectAttempts').textContent = '0';
   $('healthPeers').innerHTML = '<div class="health-empty">No remote peers yet.</div>';
-  setConn(false);
-  render();
+  $('players').innerHTML = '';
+  $('stage').innerHTML = '';
+  setConn(false, 0);
 }
 
-/* ============ networking ============ */
-async function connect() {
-  const rtcConfig = await makeRtcConfig();
-  transport = createTrysteroNostrTransport({
-    roomId: roomCode,
-    inviteToken,
-    appNamespace: APP_NAMESPACE,
-    rtcConfig,
-    onPeerJoin: handlePeerJoin,
-    onPeerLeave: handlePeerLeave,
-    onHealth: renderHealth,
-    onError: renderTransportError,
-  });
-  localPeerId = transport.localPeerId;
-  if (createdRoom) hostId = localPeerId;
-
-  sendHello = transport.makeAction('hello', (payload, peerId) => {
-    const hello = normalizeHello(payload);
-    names[peerId] = hello.name;
-    departed.delete(peerId);
-    acceptHost(hello.hostId);
-    if (iAmHost()) broadcast();
-    scheduleHostRecovery();
-    render();
-  });
-
-  sendPick = transport.makeAction('pick', (choice, peerId) => {
-    if (!iAmHost()) return;               // only host records picks
-    hostRecordPick(peerId, choice);
-  });
-
-  sendState = transport.makeAction('state', (message, peerId) => {
-    const state = normalizeState(message);
-    if (iAmHost()) {
-      const connectedToAnotherHost =
-        state.hostId &&
-        state.hostId !== localPeerId &&
-        state.hostId === peerId &&
-        directPeers.size <= 1;
-
-      if (!connectedToAnotherHost) return;
-      acceptHost(state.hostId, true);
-      for (const k of Object.keys(hostPicks)) delete hostPicks[k];
-    } else {
-      if (hostId && peerId !== hostId) return;
-      acceptHost(state.hostId, peerId === hostId);
-    }
-    applyRoster(state.roster);
-    G = state.gameState;
-    scheduleHostRecovery();
-    if (G.phase !== 'pick') myPick = null;
-    if (G.phase === 'pick' && !G.locked.includes(localPeerId)) {/* keep my un-locked pick */}
-    render();
-  });
-
-  sendHost = transport.makeAction('host', (message, peerId) => {
-    if (message?.from !== hostId || peerId !== hostId) return;
-    setHost(message.to);
-    if (message.gameState) {
-      applyRoster(message.roster);
-      G = message.gameState;
-      myPick = null;
-    }
-    render();
-  });
-
-  sendPresence = transport.makeAction('presence', (message, peerId) => {
-    const report = normalizePresence(message);
-    if (!report) return;
-    names[peerId] = report.name;
-    applyRoster(report.roster);
-    acceptHost(report.hostId);
-    if (iAmHost()) {
-      maybeTransferToBetterHost(peerId, report);
-      if (iAmHost()) broadcast();
-    }
-    render();
-  });
-
-  setInterval(sendPresenceSnapshot, 5000);
-  setConn(false); // until first peer arrives
-}
-
-async function makeRtcConfig() {
-  const useTurn = $('useTurnInput').checked;
-  const forceRelay = $('forceRelayInput').checked;
-  if (!useTurn) return undefined;
-  try {
-    return await buildRtcConfig({useTurn, forceRelay});
-  } catch (error) {
-    // Relay was requested but the provider couldn't supply servers. Don't block
-    // the join — fall back to a direct connection and surface why.
-    $('transportError').textContent =
-      `Relay unavailable (${error.message}). Connecting directly.`;
-    return undefined;
-  }
-}
-
-function handlePeerJoin(peerId) {
-  if (!sendHello || !sendState || !sendHost || !sendPresence) {
-    setTimeout(() => handlePeerJoin(peerId), 0);
-    return;
-  }
-  directPeers.add(peerId);
-  sendHello(makeHello(), peerId);
-  sendPresenceSnapshot(peerId);
-  if (iAmHost()) sendState(makeStateMessage(), peerId);  // catch the newcomer up
-  scheduleHostRecovery();
-  setConn(true);
-  render();
-}
-
-function handlePeerLeave(peerId) {
-  directPeers.delete(peerId);
-  delete hostPicks[peerId];
-  const wasHost = peerId === hostId;
-  if (wasHost) {
-    departed.add(peerId);
-    hostId = null;
-  }
-  if (iAmHost()) {
-    departed.add(peerId);
-    delete names[peerId];
-    G.locked = G.locked.filter(id => id !== peerId);
-    if (wasHost && G.phase === 'pick') {
-      // host changed mid-round: keep it simple, restart the round
-      startRound(G.game);
-    } else {
-      hostCheckAllIn();
-      broadcast();
-    }
-  }
-  scheduleHostRecovery();
-  if (Object.keys(names).length === 1) setConn(false);
-  render();
-}
-
-function playerIds() { return Object.keys(names).sort(); }
-function connectedPeerIds() {
-  return playerIds().filter(id => !departed.has(id));
-}
-function makeHello() {
-  return {name: myName, hostId};
-}
-function normalizeHello(payload) {
-  if (payload && typeof payload === 'object') {
-    return {
-      name: String(payload.name || '').slice(0, 20) || 'peer',
-      hostId: typeof payload.hostId === 'string' ? payload.hostId : null,
-    };
-  }
-  return {name: String(payload).slice(0, 20) || 'peer', hostId: null};
-}
-function makeStateMessage() {
-  return {hostId, roster: names, gameState: G};
-}
-function normalizeState(message) {
-  if (message && typeof message === 'object' && 'gameState' in message) {
-    return {
-      hostId: typeof message.hostId === 'string' ? message.hostId : null,
-      roster: message.roster && typeof message.roster === 'object' ? message.roster : null,
-      gameState: message.gameState,
-    };
-  }
-  return {hostId: null, roster: null, gameState: message};
-}
-function applyRoster(roster) {
-  if (!roster) return;
-  for (const [id, name] of Object.entries(roster)) {
-    if (!departed.has(id)) names[id] = String(name).slice(0, 20) || 'peer';
-  }
-  names[localPeerId] = myName;
-}
-function makePresence() {
-  return {
-    name: myName,
-    hostId,
-    roster: names,
-    directPeerIds: [...directPeers],
-  };
-}
-function normalizePresence(message) {
-  if (!message || typeof message !== 'object') return null;
-  return {
-    name: String(message.name || '').slice(0, 20) || 'peer',
-    hostId: typeof message.hostId === 'string' ? message.hostId : null,
-    roster: message.roster && typeof message.roster === 'object' ? message.roster : null,
-    directPeerIds: Array.isArray(message.directPeerIds)
-      ? message.directPeerIds.filter(id => typeof id === 'string')
-      : [],
-  };
-}
-function sendPresenceSnapshot(target) {
-  if (!sendPresence || !localPeerId) return;
-  sendPresence(makePresence(), target);
-}
-function maybeTransferToBetterHost(peerId, report) {
-  if (G.phase !== 'lobby' || !directPeers.has(peerId) || peerId === hostId) return;
-  const reportedRosterSize = Object.keys(report.roster || {}).length;
-  const currentRosterSize = connectedPeerIds().length;
-  const reportedDirectSize = report.directPeerIds.length + 1;
-  const currentDirectSize = directPeers.size + 1;
-  if (
-    reportedRosterSize > currentRosterSize ||
-    (reportedRosterSize === currentRosterSize && reportedDirectSize > currentDirectSize)
-  ) {
-    transferHost(peerId);
-  }
-}
-function acceptHost(candidateHostId, replace = false) {
-  if (!candidateHostId || (hostId && !replace)) return;
-  hostId = candidateHostId;
-  clearHostRecovery();
-}
-function setHost(nextHostId) {
-  if (!nextHostId || !names[nextHostId]) return;
-  hostId = nextHostId;
-  clearHostRecovery();
-}
-function electFallbackHost() {
-  hostId = connectedPeerIds()[0] ?? localPeerId;
-  clearHostRecovery();
-}
-function clearHostRecovery() {
-  if (hostRecoveryTimer) clearTimeout(hostRecoveryTimer);
-  hostRecoveryTimer = null;
-}
-function scheduleHostRecovery() {
-  if (hostId || connectedPeerIds().length < 2 || hostRecoveryTimer) return;
-  hostRecoveryTimer = setTimeout(() => {
-    hostRecoveryTimer = null;
-    if (hostId || connectedPeerIds().length < 2) return;
-    electFallbackHost();
-    if (iAmHost()) broadcast();
-    render();
-  }, 3000);
-}
-function iAmHost() { return hostId === localPeerId; }
-function setConn(live) {
-  $('conn').classList.toggle('live', live);
-  $('connText').textContent = live
-    ? `${connectedPeerIds().length} connected`
-    : transport ? 'waiting for peers' : 'offline';
-}
-
+/* ============ health panel ============ */
 function renderTransportError(error) {
   $('healthErrors').textContent = error.message || String(error);
 }
-
 function renderHealth(health) {
   $('localPeerId').textContent = health.localPeerId || 'pending';
   $('transportStatus').textContent = health.status;
@@ -422,99 +172,40 @@ function renderHealth(health) {
       </div>`).join('')
     : '<div class="health-empty">No remote peers yet.</div>';
 }
-
 function shortId(peerId) {
   return `${String(peerId).slice(0, 6)}...${String(peerId).slice(-4)}`;
 }
-
-/* ============ host logic ============ */
-function broadcast() { if (transport) sendState(makeStateMessage()); render(); }
-
-function selectGame(game) {
-  if (!iAmHost()) return;
-  startRound(game);
-}
-
-function startRound(game) {
-  G = {phase: 'pick', game, round: G.round + 1, locked: [], results: null};
-  for (const k of Object.keys(hostPicks)) delete hostPicks[k];
-  myPick = null;
-  broadcast();
-}
-
-function hostRecordPick(peerId, choice) {
-  if (G.phase !== 'pick') return;
-  hostPicks[peerId] = choice;
-  if (!G.locked.includes(peerId)) G.locked = [...G.locked, peerId];
-  hostCheckAllIn();
-  broadcast();
-}
-
-function hostCheckAllIn() {
-  if (G.phase !== 'pick') return;
-  const ids = connectedPeerIds();
-  if (ids.length > 1 && ids.every(id => G.locked.includes(id))) {
-    G.phase = 'reveal';
-    G.results = {...hostPicks};
-  }
-}
-
-function backToLobby() {
-  if (!iAmHost()) return;
-  G = {...G, phase: 'lobby', game: null, locked: [], results: null};
-  broadcast();
-}
-
-function transferHost(nextHostId) {
-  if (!iAmHost() || nextHostId === hostId || !names[nextHostId]) return;
-  G = {...G, phase: 'lobby', game: null, locked: [], results: null};
-  for (const k of Object.keys(hostPicks)) delete hostPicks[k];
-  myPick = null;
-  setHost(nextHostId);
-  sendHost({from: localPeerId, to: nextHostId, roster: names, gameState: G});
-  broadcast();
-}
-
-/* ============ my actions ============ */
-function lockPick(choice) {
-  if (G.phase !== 'pick' || G.locked.includes(localPeerId)) return;
-  myPick = choice;
-  if (iAmHost()) hostRecordPick(localPeerId, choice);
-  else if (!hostId) render();
-  else { sendPick(choice, hostId); render(); }
+function setConn(live, count) {
+  $('conn').classList.toggle('live', live);
+  $('connText').textContent = live ? `${count} connected` : client ? 'waiting for peers' : 'offline';
 }
 
 /* ============ rendering ============ */
-function render() {
-  renderPlayers();
+function render(view) {
+  if (view.round !== lastRound) { myChoice = null; lastRound = view.round; }
+  renderPlayers(view);
   const stage = $('stage');
-  if (G.phase === 'lobby') stage.innerHTML = viewLobby();
-  else if (G.phase === 'pick') stage.innerHTML = viewPick();
-  else stage.innerHTML = viewReveal();
-  bindStage();
+  if (view.phase === 'lobby') stage.innerHTML = viewLobby(view);
+  else if (view.phase === 'pick') stage.innerHTML = viewPick(view);
+  else stage.innerHTML = viewReveal(view);
+  bindStage(view);
+  setConn(view.participants.length > 1, view.participants.length);
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c =>
-    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-function renderPlayers() {
-  $('players').innerHTML = connectedPeerIds().map(id => `
-    <div class="player ${G.locked.includes(id) ? 'locked' : ''} ${id === localPeerId ? 'me' : ''}">
+function renderPlayers(view) {
+  $('players').innerHTML = view.participants.map(id => `
+    <div class="player ${view.committedIds.includes(id) ? 'locked' : ''} ${id === client.self ? 'me' : ''}">
       <span class="pip"></span>
-      <span>${esc(names[id] || '…')}</span>
-      ${id === hostId ? '<span class="tag">HOST</span>' : ''}
-      ${iAmHost() && id !== localPeerId ? `<button class="mini-action" data-host="${esc(id)}">Make host</button>` : ''}
+      <span>${esc(view.names[id] || '…')}</span>
+      ${id === view.facilitator ? '<span class="tag">FACILITATOR</span>' : ''}
     </div>`).join('');
-  setConn(connectedPeerIds().length > 1);
 }
 
-function viewLobby() {
-  if (iAmHost()) return `
+function viewLobby(view) {
+  if (view.isFacilitator) return `
     <div class="stage-kicker">Round table</div>
     <div class="stage-title">Pick a <em>game</em></div>
-    <p class="stage-sub">You're hosting. Everyone locks in blind — nothing is shown until all hands are in.</p>
+    <p class="stage-sub">You're facilitating. Everyone locks in blind — nothing is shown until all hands are in.</p>
     <div class="game-cards">
       <button class="game-card" data-game="rps">
         <div class="gc-glyphs">✊ ✋ ✌️</div>
@@ -529,38 +220,32 @@ function viewLobby() {
     </div>`;
   return `
     <div class="stage-kicker">Round table</div>
-    <div class="stage-title">Waiting on the <em>host</em></div>
-    <p class="waiting-host">${esc(names[hostId] || 'The host')} is choosing a game…</p>`;
+    <div class="stage-title">Waiting on the <em>facilitator</em></div>
+    <p class="waiting-host">${esc(view.names[view.facilitator] || 'The facilitator')} is choosing a game…</p>`;
 }
 
-function viewPick() {
-  const locked = G.locked.includes(localPeerId);
-  const remaining = connectedPeerIds().length - G.locked.length;
-
-  if (G.game === 'rps') {
-    return `
-      <div class="stage-kicker">Round ${G.round} — Rock Paper Scissors</div>
-      <div class="stage-title">Make your <em>throw</em></div>
-      <div class="choices">
-        ${Object.entries(RPS).map(([k, v]) => `
-          <button class="choice ${myPick === k ? 'selected' : ''}" data-pick="${k}" ${locked ? 'disabled' : ''}>
-            <span class="glyph">${v.glyph}</span>
-            <span class="lbl">${k}</span>
-          </button>`).join('')}
-      </div>
-      ${lockLine(locked, remaining)}`;
-  }
-  return `
-    <div class="stage-kicker">Round ${G.round} — Fist to Five</div>
-    <div class="stage-title">How do you <em>really</em> feel?</div>
-    <div class="choices">
-      ${[0,1,2,3,4,5].map(n => `
-        <button class="choice ${myPick === n ? 'selected' : ''}" data-pick="${n}" ${locked ? 'disabled' : ''}>
+function viewPick(view) {
+  const locked = view.iAmCommitted;
+  const choices = view.game === 'rps'
+    ? Object.entries(RPS).map(([k, v]) => `
+        <button class="choice ${myChoice === k ? 'selected' : ''}" data-pick="${k}" ${locked ? 'disabled' : ''}>
+          <span class="glyph">${v.glyph}</span>
+          <span class="lbl">${k}</span>
+        </button>`).join('')
+    : [0, 1, 2, 3, 4, 5].map(n => `
+        <button class="choice ${myChoice === n ? 'selected' : ''}" data-pick="${n}" ${locked ? 'disabled' : ''}>
           <span class="num">${n}</span>
           <span class="lbl">${n === 0 ? 'fist' : n === 5 ? 'all in' : '&nbsp;'}</span>
-        </button>`).join('')}
-    </div>
-    ${lockLine(locked, remaining)}`;
+        </button>`).join('');
+  const title = view.game === 'rps'
+    ? `Round ${view.round} — Rock Paper Scissors</div><div class="stage-title">Make your <em>throw</em>`
+    : `Round ${view.round} — Fist to Five</div><div class="stage-title">How do you <em>really</em> feel?`;
+  return `
+    <div class="stage-kicker">${title}</div>
+    <div class="choices">${choices}</div>
+    ${lockLine(locked, view.remaining)}
+    ${view.isFacilitator && locked && view.remaining > 0
+      ? `<div class="stage-actions"><button class="btn-ghost" id="forceBtn">Reveal now</button></div>` : ''}`;
 }
 
 function lockLine(locked, remaining) {
@@ -568,89 +253,68 @@ function lockLine(locked, remaining) {
   return `<div class="lock-note"><strong>Locked in.</strong> Waiting on ${remaining} player${remaining === 1 ? '' : 's'}…</div>`;
 }
 
-function viewReveal() {
-  const R = G.results || {};
-  const ids = Object.keys(R);
-
-  if (G.game === 'rps') return viewRevealRPS(R, ids);
-  return viewRevealF2F(R, ids);
+function viewReveal(view) {
+  const picks = view.revealPicks || {};
+  const ids = Object.keys(picks);
+  return view.game === 'rps' ? revealRps(view, picks, ids) : revealF2f(view, picks, ids);
 }
 
-function viewRevealRPS(R, ids) {
-  let verdict = '';
-  let winners = new Set();
-
-  const thrown = new Set(Object.values(R));
-  if (ids.length === 2) {
-    const [a, b] = ids;
-    if (R[a] === R[b]) verdict = `A <em>draw.</em> Run it back.`;
-    else {
-      const w = RPS[R[a]].beats === R[b] ? a : b;
-      winners.add(w);
-      const l = w === a ? b : a;
-      verdict = `<em>${esc(names[w] || 'Someone')}</em> takes it — ${R[w]} beats ${R[l]}.`;
-    }
-  } else if (thrown.size === 2) {
-    // group rules: with exactly two throws present, one side wins
-    const [t1, t2] = [...thrown];
-    const winning = RPS[t1].beats === t2 ? t1 : t2;
-    ids.forEach(id => { if (R[id] === winning) winners.add(id); });
-    verdict = `<em>${winning[0].toUpperCase() + winning.slice(1)}</em> wins the round.`;
-  } else if (thrown.size === 1) {
-    verdict = `Everyone threw the same. A <em>draw.</em>`;
+function revealRps(view, picks, ids) {
+  const res = view.result;
+  const winners = new Set(res.winners);
+  let verdict;
+  if (res.outcome === 'draw') verdict = ids.length === 2 ? `A <em>draw.</em> Run it back.` : `Everyone threw the same. A <em>draw.</em>`;
+  else if (res.outcome === 'stalemate') verdict = `All three throws on the table — <em>stalemate.</em>`;
+  else if (ids.length === 2) {
+    const w = res.winners[0];
+    const l = ids.find(i => i !== w);
+    verdict = `<em>${esc(view.names[w] || 'Someone')}</em> takes it — ${picks[w]} beats ${picks[l]}.`;
   } else {
-    verdict = `All three throws on the table — <em>stalemate.</em>`;
+    const t = res.winningThrow;
+    verdict = `<em>${t[0].toUpperCase() + t.slice(1)}</em> wins the round.`;
   }
-
   return `
-    <div class="stage-kicker">Round ${G.round} — the reveal</div>
+    <div class="stage-kicker">Round ${view.round} — the reveal</div>
     <div class="verdict">${verdict}</div>
     <div class="results">
       ${ids.map((id, i) => `
         <div class="result-row ${winners.has(id) ? 'winner' : ''}" style="animation-delay:${i * 90}ms">
-          <span class="r-glyph">${RPS[R[id]]?.glyph || '?'}</span>
-          <span class="r-name">${esc(names[id] || 'departed player')}</span>
-          <span class="r-choice">${esc(R[id])}${winners.has(id) ? ' · win' : ''}</span>
+          <span class="r-glyph">${RPS[picks[id]]?.glyph || '?'}</span>
+          <span class="r-name">${esc(view.names[id] || 'departed player')}</span>
+          <span class="r-choice">${esc(picks[id])}${winners.has(id) ? ' · win' : ''}</span>
         </div>`).join('')}
     </div>
-    ${hostActions('Throw again')}`;
+    ${facilitatorActions(view, 'Throw again')}`;
 }
 
-function viewRevealF2F(R, ids) {
-  const vals = ids.map(id => Number(R[id]));
-  const avg = vals.length ? (vals.reduce((s, v) => s + v, 0) / vals.length) : 0;
-  const spread = vals.length ? Math.max(...vals) - Math.min(...vals) : 0;
-  const consensus = spread <= 1;
-  const hardNo = vals.some(v => v === 0);
-
+function revealF2f(view, picks, ids) {
+  const res = view.result;
   let verdict;
-  if (hardNo) verdict = `A fist on the table — <em>someone is blocking.</em> Talk it out.`;
-  else if (consensus && avg >= 4) verdict = `<span class="consensus">Strong consensus.</span> Ship it.`;
-  else if (consensus) verdict = `<span class="consensus">Aligned</span> — the room agrees.`;
-  else verdict = `The room is <em>split.</em> Hear from the ${Math.min(...vals)}s and the ${Math.max(...vals)}s.`;
-
-  const sorted = [...ids].sort((a, b) => Number(R[a]) - Number(R[b]));
-
+  if (res.hardNo) verdict = `A fist on the table — <em>someone is blocking.</em> Talk it out.`;
+  else if (res.consensus && res.avg >= 4) verdict = `<span class="consensus">Strong consensus.</span> Ship it.`;
+  else if (res.consensus) verdict = `<span class="consensus">Aligned</span> — the room agrees.`;
+  else verdict = `The room is <em>split.</em> Hear from the ${res.min}s and the ${res.max}s.`;
+  const sorted = [...ids].sort((a, b) => Number(picks[a]) - Number(picks[b]));
   return `
-    <div class="stage-kicker">Round ${G.round} — the reveal</div>
+    <div class="stage-kicker">Round ${view.round} — the reveal</div>
     <div class="verdict">${verdict}</div>
     <div class="stat-strip">
-      <div class="stat"><div class="s-val">${avg.toFixed(1)}</div><div class="s-lbl">average</div></div>
-      <div class="stat"><div class="s-val">${spread}</div><div class="s-lbl">spread</div></div>
+      <div class="stat"><div class="s-val">${res.avg.toFixed(1)}</div><div class="s-lbl">average</div></div>
+      <div class="stat"><div class="s-val">${res.spread}</div><div class="s-lbl">spread</div></div>
     </div>
     <div class="results">
       ${sorted.map((id, i) => `
         <div class="result-row" style="animation-delay:${i * 90}ms">
-          <span class="r-num">${esc(R[id])}</span>
-          <span class="r-name">${esc(names[id] || 'departed player')}</span>
-          <span class="r-choice">${Number(R[id]) === 0 ? 'block' : Number(R[id]) >= 4 ? 'support' : 'reserved'}</span>
+          <span class="r-num">${esc(picks[id])}</span>
+          <span class="r-name">${esc(view.names[id] || 'departed player')}</span>
+          <span class="r-choice">${Number(picks[id]) === 0 ? 'block' : Number(picks[id]) >= 4 ? 'support' : 'reserved'}</span>
         </div>`).join('')}
     </div>
-    ${hostActions('Vote again')}`;
+    ${facilitatorActions(view, 'Vote again')}`;
 }
 
-function hostActions(againLabel) {
-  if (!iAmHost()) return `<div class="lock-note">Waiting on ${esc(names[hostId] || 'the host')} for the next round…</div>`;
+function facilitatorActions(view, againLabel) {
+  if (!view.isFacilitator) return `<div class="lock-note">Waiting on ${esc(view.names[view.facilitator] || 'the facilitator')} for the next round…</div>`;
   return `
     <div class="stage-actions">
       <button class="btn-primary" id="againBtn">${againLabel}</button>
@@ -658,20 +322,20 @@ function hostActions(againLabel) {
     </div>`;
 }
 
-function bindStage() {
+function bindStage(view) {
   document.querySelectorAll('[data-game]').forEach(b =>
-    b.addEventListener('click', () => selectGame(b.dataset.game)));
+    b.addEventListener('click', () => client.selectGame(b.dataset.game)));
   document.querySelectorAll('[data-pick]').forEach(b =>
     b.addEventListener('click', () => {
-      const v = b.dataset.pick;
-      lockPick(G.game === 'f2f' ? Number(v) : v);
+      const v = view.game === 'f2f' ? Number(b.dataset.pick) : b.dataset.pick;
+      myChoice = v;
+      client.lock(v);
+      render(client.getView());
     }));
   const again = $('againBtn');
-  if (again) again.addEventListener('click', () => startRound(G.game));
+  if (again) again.addEventListener('click', () => client.selectGame(view.game));
   const lobby = $('lobbyBtn');
-  if (lobby) lobby.addEventListener('click', backToLobby);
-  document.querySelectorAll('[data-host]').forEach(b =>
-    b.addEventListener('click', () => transferHost(b.dataset.host)));
+  if (lobby) lobby.addEventListener('click', () => client.backToLobby());
+  const force = $('forceBtn');
+  if (force) force.addEventListener('click', () => client.forceReveal());
 }
-
-render();
