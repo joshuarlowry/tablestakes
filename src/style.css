@@ -257,6 +257,20 @@ button {
   letter-spacing: 0.1em;
 }
 .player.me { border-color: rgba(236,229,211,0.35); }
+.mini-action {
+  background: transparent;
+  color: var(--cream-dim);
+  border: 1px solid rgba(236,229,211,0.18);
+  border-radius: 3px;
+  padding: 2px 5px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.mini-action:hover {
+  color: var(--brass);
+  border-color: rgba(201,168,106,0.45);
+}
 
 /* game area */
 .stage {

@@ -21,9 +21,9 @@ const RPS = {
 let transport = null;
 let localPeerId = null;
 let myName = '';
-let hostId = null;                 // lowest peer id = host
+let hostId = null;                 // room creator by default, transferable by host
 const names = {};                  // peerId -> name (includes self)
-let sendHello, sendPick, sendState;
+let sendHello, sendPick, sendState, sendHost;
 
 // host-authoritative game state (mirrored to peers via 'state')
 let G = {
@@ -124,13 +124,24 @@ function connect() {
     hostRecordPick(peerId, choice);
   });
 
-  sendState = transport.makeAction('state', (message) => {
+  sendState = transport.makeAction('state', (message, peerId) => {
     if (iAmHost()) return;                // host is the source of truth
+    if (hostId && peerId !== hostId) return;
     const state = normalizeState(message);
-    acceptHost(state.hostId);
+    acceptHost(state.hostId, peerId === hostId);
     G = state.gameState;
     if (G.phase !== 'pick') myPick = null;
     if (G.phase === 'pick' && !G.locked.includes(localPeerId)) {/* keep my un-locked pick */}
+    render();
+  });
+
+  sendHost = transport.makeAction('host', (message, peerId) => {
+    if (message?.from !== hostId || peerId !== hostId) return;
+    setHost(message.to);
+    if (message.gameState) {
+      G = message.gameState;
+      myPick = null;
+    }
     render();
   });
 
@@ -138,7 +149,7 @@ function connect() {
 }
 
 function handlePeerJoin(peerId) {
-  if (!sendHello || !sendState) {
+  if (!sendHello || !sendState || !sendHost) {
     setTimeout(() => handlePeerJoin(peerId), 0);
     return;
   }
@@ -192,9 +203,13 @@ function normalizeState(message) {
   }
   return {hostId: null, gameState: message};
 }
-function acceptHost(candidateHostId) {
-  if (!candidateHostId || hostId) return;
+function acceptHost(candidateHostId, replace = false) {
+  if (!candidateHostId || (hostId && !replace)) return;
   hostId = candidateHostId;
+}
+function setHost(nextHostId) {
+  if (!nextHostId || !names[nextHostId]) return;
+  hostId = nextHostId;
 }
 function electFallbackHost() {
   hostId = playerIds()[0] ?? localPeerId;
@@ -268,6 +283,16 @@ function backToLobby() {
   broadcast();
 }
 
+function transferHost(nextHostId) {
+  if (!iAmHost() || nextHostId === hostId || !names[nextHostId]) return;
+  G = {...G, phase: 'lobby', game: null, locked: [], results: null};
+  for (const k of Object.keys(hostPicks)) delete hostPicks[k];
+  myPick = null;
+  setHost(nextHostId);
+  sendHost({from: localPeerId, to: nextHostId, gameState: G});
+  broadcast();
+}
+
 /* ============ my actions ============ */
 function lockPick(choice) {
   if (G.phase !== 'pick' || G.locked.includes(localPeerId)) return;
@@ -298,6 +323,7 @@ function renderPlayers() {
       <span class="pip"></span>
       <span>${esc(names[id] || '…')}</span>
       ${id === hostId ? '<span class="tag">HOST</span>' : ''}
+      ${iAmHost() && id !== localPeerId ? `<button class="mini-action" data-host="${esc(id)}">Make host</button>` : ''}
     </div>`).join('');
   setConn(playerIds().length > 1);
 }
@@ -462,6 +488,8 @@ function bindStage() {
   if (again) again.addEventListener('click', () => startRound(G.game));
   const lobby = $('lobbyBtn');
   if (lobby) lobby.addEventListener('click', backToLobby);
+  document.querySelectorAll('[data-host]').forEach(b =>
+    b.addEventListener('click', () => transferHost(b.dataset.host)));
 }
 
 render();
