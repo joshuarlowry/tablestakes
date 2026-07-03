@@ -127,10 +127,21 @@ function connect() {
   });
 
   sendState = transport.makeAction('state', (message, peerId) => {
-    if (iAmHost()) return;                // host is the source of truth
-    if (hostId && peerId !== hostId) return;
     const state = normalizeState(message);
-    acceptHost(state.hostId, peerId === hostId);
+    if (iAmHost()) {
+      const connectedToAnotherHost =
+        state.hostId &&
+        state.hostId !== localPeerId &&
+        state.hostId === peerId &&
+        playerIds().length <= 1;
+
+      if (!connectedToAnotherHost) return;
+      acceptHost(state.hostId, true);
+      for (const k of Object.keys(hostPicks)) delete hostPicks[k];
+    } else {
+      if (hostId && peerId !== hostId) return;
+      acceptHost(state.hostId, peerId === hostId);
+    }
     G = state.gameState;
     scheduleHostRecovery();
     if (G.phase !== 'pick') myPick = null;
