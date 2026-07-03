@@ -133,6 +133,23 @@ input[type="text"]::placeholder { color: #55503f; }
 
 .field { margin-bottom: 22px; }
 
+.transport-config {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 22px;
+  background: rgba(26, 25, 21, 0.58);
+}
+.transport-config .field { margin-bottom: 14px; }
+.transport-config .field:last-of-type { margin-bottom: 0; }
+.transport-error,
+.health-errors {
+  min-height: 18px;
+  margin-top: 10px;
+  color: var(--accent);
+  font-size: 11px;
+}
+
 button {
   font-family: 'IBM Plex Mono', monospace;
   cursor: pointer;
@@ -426,6 +443,64 @@ button {
   justify-content: center;
   margin-top: 30px;
   flex-wrap: wrap;
+}
+
+.health-panel {
+  margin-top: 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ink-2);
+  padding: 16px;
+}
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+@media (max-width: 700px) {
+  .health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.health-grid > div {
+  border: 1px solid rgba(236,229,211,0.08);
+  border-radius: 4px;
+  padding: 10px;
+  min-width: 0;
+}
+.health-label {
+  display: block;
+  color: var(--cream-dim);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.health-grid strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.health-peers {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.health-peer {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 1fr 1fr;
+  gap: 10px;
+  align-items: center;
+  color: var(--cream-dim);
+  font-size: 11px;
+}
+@media (max-width: 640px) {
+  .health-peer { grid-template-columns: 1fr 1fr; }
+}
+.health-empty {
+  color: var(--cream-dim);
+  font-size: 11px;
 }
 
 .toast {

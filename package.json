@@ -7,10 +7,10 @@
     "build": "vite build",
     "preview": "vite preview"
   },
-  "dependencies": {
-    "@trystero-p2p/nostr": "^0.25.2"
-  },
   "devDependencies": {
     "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "@trystero-p2p/nostr": "^0.25.2"
   }
 }

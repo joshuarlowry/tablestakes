@@ -1,16 +1,15 @@
-import { joinRoom, selfId } from '@trystero-p2p/nostr';
+import {
+  createSecureNostrInvite,
+  createTrysteroNostrTransport,
+} from './transports/trysteroNostr.js';
 import './style.css';
 
 /* ============ config & helpers ============ */
-const APP_ID = 'tablestakes-v1';
+const APP_NAMESPACE = 'tablestakes-v1';
 const $ = id => document.getElementById(id);
-
-const WORDS_A = ['amber','brass','cedar','delta','ember','flint','grove','harbor','iron','juniper','koa','lumen','marble','noir','onyx','pine'];
-const WORDS_B = ['anvil','banner','circuit','dial','engine','fable','gambit','helm','index','jetty','kiln','ledger','meridian','needle','orbit','prism'];
-const makeCode = () =>
-  WORDS_A[Math.floor(Math.random()*WORDS_A.length)] + '-' +
-  WORDS_B[Math.floor(Math.random()*WORDS_B.length)] + '-' +
-  Math.floor(Math.random()*90+10);
+const hashParams = () => new URLSearchParams(location.hash.replace(/^#/, ''));
+const inviteUrl = () =>
+  `${location.origin}${location.pathname}?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(inviteToken)}`;
 
 const RPS = {
   rock:     {glyph:'✊', beats:'scissors'},
@@ -19,7 +18,8 @@ const RPS = {
 };
 
 /* ============ state ============ */
-let room = null;
+let transport = null;
+let localPeerId = null;
 let myName = '';
 let hostId = null;                 // lowest peer id = host
 const names = {};                  // peerId -> name (includes self)
@@ -39,6 +39,9 @@ let myPick = null;
 /* ============ boot ============ */
 const params = new URLSearchParams(location.search);
 let roomCode = params.get('room');
+let inviteToken = hashParams().get('token') || params.get('token') || '';
+
+if (inviteToken) $('inviteTokenInput').value = inviteToken;
 
 if (roomCode) {
   $('createBtn').textContent = 'Join room';
@@ -50,7 +53,7 @@ if (roomCode) {
 $('createBtn').addEventListener('click', enter);
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') enter(); });
 $('copyBtn').addEventListener('click', async () => {
-  const url = `${location.origin}${location.pathname}?room=${roomCode}`;
+  const url = inviteUrl();
   try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); }
   const t = $('toast');
   t.classList.add('show');
@@ -61,11 +64,26 @@ function enter() {
   myName = $('nameInput').value.trim();
   if (!myName) { $('nameInput').focus(); return; }
   if (!roomCode) {
-    roomCode = makeCode();
-    history.replaceState(null, '', `?room=${roomCode}`);
+    const invite = createSecureNostrInvite();
+    roomCode = invite.roomId;
+    inviteToken = invite.inviteToken;
+    $('inviteTokenInput').value = inviteToken;
+    history.replaceState(null, '', inviteUrl());
+  } else {
+    inviteToken = $('inviteTokenInput').value.trim() || inviteToken;
+    if (!inviteToken) {
+      $('transportError').textContent = 'This room needs an invitation token.';
+      return;
+    }
+    history.replaceState(null, '', inviteUrl());
   }
-  names[selfId] = myName;
-  connect();
+  try {
+    connect();
+  } catch (error) {
+    $('transportError').textContent = error.message;
+    return;
+  }
+  names[localPeerId] = myName;
   $('entry').classList.add('hidden');
   $('room').classList.add('visible');
   $('roomCodeText').textContent = roomCode;
@@ -74,74 +92,106 @@ function enter() {
 
 /* ============ networking ============ */
 function connect() {
-  room = joinRoom({appId: APP_ID}, roomCode);
+  transport = createTrysteroNostrTransport({
+    roomId: roomCode,
+    inviteToken,
+    appNamespace: APP_NAMESPACE,
+    onPeerJoin: handlePeerJoin,
+    onPeerLeave: handlePeerLeave,
+    onHealth: renderHealth,
+    onError: renderTransportError,
+  });
+  localPeerId = transport.localPeerId;
 
-  [sendHello] = wire('hello', (name, peerId) => {
+  sendHello = transport.makeAction('hello', (name, peerId) => {
     names[peerId] = String(name).slice(0, 20);
     electHost();
     render();
   });
 
-  [sendPick] = wire('pick', (choice, peerId) => {
+  sendPick = transport.makeAction('pick', (choice, peerId) => {
     if (!iAmHost()) return;               // only host records picks
     hostRecordPick(peerId, choice);
   });
 
-  [sendState] = wire('state', (state) => {
+  sendState = transport.makeAction('state', (state) => {
     if (iAmHost()) return;                // host is the source of truth
     G = state;
     if (G.phase !== 'pick') myPick = null;
-    if (G.phase === 'pick' && !G.locked.includes(selfId)) {/* keep my un-locked pick */}
+    if (G.phase === 'pick' && !G.locked.includes(localPeerId)) {/* keep my un-locked pick */}
     render();
   });
-
-  room.onPeerJoin = peerId => {
-    sendHello(myName, peerId);
-    electHost();
-    if (iAmHost()) sendState(G, peerId);  // catch the newcomer up
-    setConn(true);
-    render();
-  };
-
-  room.onPeerLeave = peerId => {
-    delete names[peerId];
-    delete hostPicks[peerId];
-    const wasHost = peerId === hostId;
-    electHost();
-    if (iAmHost()) {
-      G.locked = G.locked.filter(id => id !== peerId);
-      if (wasHost && G.phase === 'pick') {
-        // host changed mid-round: keep it simple, restart the round
-        startRound(G.game);
-      } else {
-        hostCheckAllIn();
-        broadcast();
-      }
-    }
-    if (Object.keys(names).length === 1) setConn(false);
-    render();
-  };
 
   electHost();
   setConn(false); // until first peer arrives
 }
 
-function wire(name, handler) {
-  const action = room.makeAction(name);
-  action.onMessage = (payload, {peerId}) => handler(payload, peerId);
-  return [(payload, target) => action.send(payload, target ? {target} : undefined)];
+function handlePeerJoin(peerId) {
+  if (!sendHello || !sendState) {
+    setTimeout(() => handlePeerJoin(peerId), 0);
+    return;
+  }
+  sendHello(myName, peerId);
+  electHost();
+  if (iAmHost()) sendState(G, peerId);  // catch the newcomer up
+  setConn(true);
+  render();
+}
+
+function handlePeerLeave(peerId) {
+  delete names[peerId];
+  delete hostPicks[peerId];
+  const wasHost = peerId === hostId;
+  electHost();
+  if (iAmHost()) {
+    G.locked = G.locked.filter(id => id !== peerId);
+    if (wasHost && G.phase === 'pick') {
+      // host changed mid-round: keep it simple, restart the round
+      startRound(G.game);
+    } else {
+      hostCheckAllIn();
+      broadcast();
+    }
+  }
+  if (Object.keys(names).length === 1) setConn(false);
+  render();
 }
 
 function playerIds() { return Object.keys(names).sort(); }
-function electHost() { hostId = playerIds()[0] ?? selfId; }
-function iAmHost() { return hostId === selfId; }
+function electHost() { hostId = playerIds()[0] ?? localPeerId; }
+function iAmHost() { return hostId === localPeerId; }
 function setConn(live) {
   $('conn').classList.toggle('live', live);
   $('connText').textContent = live ? `${playerIds().length} connected` : 'waiting for peers';
 }
 
+function renderTransportError(error) {
+  $('healthErrors').textContent = error.message || String(error);
+}
+
+function renderHealth(health) {
+  $('localPeerId').textContent = health.localPeerId || 'pending';
+  $('transportStatus').textContent = health.status;
+  $('peerCount').textContent = String(health.peerCount);
+  $('reconnectAttempts').textContent = String(health.reconnectAttempts);
+  $('healthPeers').innerHTML = health.peers.length
+    ? health.peers.map(peer => `
+      <div class="health-peer">
+        <span class="mono">${esc(shortId(peer.peerId))}</span>
+        <span>${peer.joinMs == null ? 'joining' : `${peer.joinMs}ms join`}</span>
+        <span>${peer.lastRttMs == null ? 'rtt --' : `${peer.lastRttMs}ms rtt`}</span>
+        <span>${peer.authenticated ? 'auth ok' : 'auth pending'}</span>
+        <span>${peer.disconnects} drop${peer.disconnects === 1 ? '' : 's'}</span>
+      </div>`).join('')
+    : '<div class="health-empty">No remote peers yet.</div>';
+}
+
+function shortId(peerId) {
+  return `${String(peerId).slice(0, 6)}...${String(peerId).slice(-4)}`;
+}
+
 /* ============ host logic ============ */
-function broadcast() { if (room) sendState(G); render(); }
+function broadcast() { if (transport) sendState(G); render(); }
 
 function selectGame(game) {
   if (!iAmHost()) return;
@@ -180,9 +230,9 @@ function backToLobby() {
 
 /* ============ my actions ============ */
 function lockPick(choice) {
-  if (G.phase !== 'pick' || G.locked.includes(selfId)) return;
+  if (G.phase !== 'pick' || G.locked.includes(localPeerId)) return;
   myPick = choice;
-  if (iAmHost()) hostRecordPick(selfId, choice);
+  if (iAmHost()) hostRecordPick(localPeerId, choice);
   else { sendPick(choice, hostId); render(); }
 }
 
@@ -203,7 +253,7 @@ function esc(s) {
 
 function renderPlayers() {
   $('players').innerHTML = playerIds().map(id => `
-    <div class="player ${G.locked.includes(id) ? 'locked' : ''} ${id === selfId ? 'me' : ''}">
+    <div class="player ${G.locked.includes(id) ? 'locked' : ''} ${id === localPeerId ? 'me' : ''}">
       <span class="pip"></span>
       <span>${esc(names[id] || '…')}</span>
       ${id === hostId ? '<span class="tag">HOST</span>' : ''}
@@ -235,7 +285,7 @@ function viewLobby() {
 }
 
 function viewPick() {
-  const locked = G.locked.includes(selfId);
+  const locked = G.locked.includes(localPeerId);
   const remaining = playerIds().length - G.locked.length;
 
   if (G.game === 'rps') {
