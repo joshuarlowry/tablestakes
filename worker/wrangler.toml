@@ -13,12 +13,15 @@ CREDENTIAL_TTL = "86400"
 #   wrangler secret put TURN_KEY_API_TOKEN
 # (CI sets these automatically from GitHub secrets — see the deploy workflow.)
 
-# TEMP smoke test — proves the account/token we already have can provision a
-# Durable Object namespace. Remove this block if not, or build on it if so.
-[[durable_objects.bindings]]
-name = "ROOM_DO"
-class_name = "RoomDO"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["RoomDO"]
+# Durable Objects confirmed provisionable on this account/token via a smoke
+# test (2026-07-03) — free plan requires `new_sqlite_classes`, not
+# `new_classes`, in the migration. Re-add a binding + migration here when
+# building the real room-relay Durable Object:
+#
+# [[durable_objects.bindings]]
+# name = "ROOM_DO"
+# class_name = "RoomDO"
+#
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["RoomDO"]

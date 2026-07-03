@@ -97,8 +97,3 @@ function jsonResponse(body, status, headers) {
     headers: { ...headers, 'Content-Type': 'application/json' },
   });
 }
-
-// TEMP smoke test: proves the account/token can provision a Durable Object
-// namespace before building the real room-relay logic on it. Remove once
-// confirmed (or replace with the real room relay if it works).
-export { RoomDO } from './room.js';
