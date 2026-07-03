@@ -339,7 +339,7 @@ button {
 }
 
 /* game picker (lobby) */
-.game-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.game-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 @media (max-width: 560px) { .game-cards { grid-template-columns: 1fr; } }
 
 .game-card {
@@ -574,3 +574,44 @@ footer {
   letter-spacing: 0.16em;
   text-align: center;
 }
+
+/* ---------- game config forms (lobby) ---------- */
+textarea {
+  width: 100%;
+  background: var(--ink-2);
+  border: 1px solid var(--line);
+  color: var(--cream);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.2s;
+}
+textarea:focus { border-color: var(--brass); }
+
+/* ---------- health check pick ---------- */
+.health-rate { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 20px; }
+.health-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 12px 16px;
+  gap: 16px;
+}
+.hc-name { font-size: 13px; }
+.hc-lights { display: flex; gap: 6px; }
+.hc-light {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 18px;
+  padding: 4px 8px;
+  opacity: 0.5;
+}
+.hc-light.selected { opacity: 1; border-color: var(--brass); background: var(--accent-soft); }
+.hc-light:disabled { cursor: default; }

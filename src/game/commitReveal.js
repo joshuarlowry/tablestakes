@@ -8,6 +8,8 @@
  * module is pure and testable.
  */
 
+import { canonicalize } from './canonical.js';
+
 /** Default hasher: SHA-256 hex via Web Crypto (available in browsers and Node 20+). */
 export async function sha256Hex(input) {
   const bytes = new TextEncoder().encode(input);
@@ -15,7 +17,9 @@ export async function sha256Hex(input) {
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const encode = (pick, nonce) => `${String(pick)}|${nonce}`;
+// Canonical JSON so structured picks (ranking arrays, per-category objects)
+// hash identically on every peer regardless of key insertion order.
+const encode = (pick, nonce) => `${canonicalize(pick)}|${nonce}`;
 
 /**
  * @param {string|number} pick

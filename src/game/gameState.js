@@ -11,12 +11,13 @@
  * by round, so stale-round events are naturally inert.
  */
 
-import { rpsResult, f2fResult } from './rules.js';
+import { getGame } from './registry.js';
 
 export function initialState() {
   return {
     round: 0,
     game: null,
+    config: {},
     selectFrom: null,
     names: {},
     departed: {},
@@ -65,11 +66,12 @@ export function reduce(state, event) {
     }
     case 'select-game': {
       if (!actionWins(state, event)) return state;
-      return { ...state, round: event.round, game: event.game, selectFrom: event.from };
+      const config = event.config && typeof event.config === 'object' ? event.config : {};
+      return { ...state, round: event.round, game: event.game, config, selectFrom: event.from };
     }
     case 'back-to-lobby': {
       if (!actionWins(state, event)) return state;
-      return { ...state, round: event.round, game: null, selectFrom: event.from };
+      return { ...state, round: event.round, game: null, config: {}, selectFrom: event.from };
     }
     case 'commit':
       return { ...state, commits: setIn(state.commits, event.round, event.from, event.hash) };
@@ -135,28 +137,38 @@ export function deriveView(state, selfId, activeIds, verified = {}) {
   const forced = !!state.forced[r];
   const revealReady = forced || allCommitted;
 
-  let phase = state.game ? 'pick' : 'lobby';
+  const gameDef = state.game ? getGame(state.game) : null;
+  const config = gameDef ? gameDef.normalizeConfig(state.config) : {};
+
+  // Unknown game id (garbage or newer client version) renders as lobby rather
+  // than a permanently stuck pick phase.
+  let phase = gameDef ? 'pick' : 'lobby';
   let result = null;
   let revealPicks = null;
 
-  if (state.game && revealReady) {
+  if (gameDef && revealReady) {
     const picks = {};
     for (const id of committedIds) {
-      if (id in verifiedR) picks[id] = verifiedR[id];
+      // Filter both unverified and malformed picks — a hostile peer's garbage
+      // reveal must not throw the (pure, total) result computation.
+      if (id in verifiedR && gameDef.validatePick(verifiedR[id], config)) {
+        picks[id] = verifiedR[id];
+      }
     }
     const ready = forced
       ? Object.keys(picks).length > 0
-      : committedIds.every(id => id in picks);
+      : committedIds.every(id => id in verifiedR);
     if (ready) {
       phase = 'reveal';
       revealPicks = picks;
-      result = state.game === 'rps' ? rpsResult(picks) : f2fResult(picks);
+      result = gameDef.result(picks, config, { round: r, participants });
     }
   }
 
   return {
     round: r,
     game: state.game,
+    config,
     phase,
     participants,
     names: state.names,

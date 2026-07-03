@@ -11,6 +11,7 @@
 import { reduce, initialState, deriveView, facilitatorOf } from './gameState.js';
 import { createGossip } from '../net/gossip.js';
 import { commit as makeCommit, verify, sha256Hex } from './commitReveal.js';
+import { canonicalize } from './canonical.js';
 
 const LIVENESS_MS = 15000;
 
@@ -116,7 +117,10 @@ export function createGameClient({
       if (!hash) { still.push(pr); continue; }           // commit not here yet — retry later
       if (await verify(pr.pick, pr.nonce, hash, hasher)) {
         verified[pr.round] ??= {};
-        if (verified[pr.round][pr.from] !== pr.pick) {
+        // Structured picks (arrays/objects) break reference equality — compare
+        // canonical forms so duplicate reveals don't re-notify forever.
+        const prev = verified[pr.round][pr.from];
+        if (prev === undefined || canonicalize(prev) !== canonicalize(pr.pick)) {
           verified[pr.round][pr.from] = pr.pick;
           changed = true;
         }
@@ -188,11 +192,11 @@ export function createGameClient({
     publish({ id: `commit:${self}:${state.round}`, type: 'commit', from: self, round: state.round, hash });
   }
 
-  function selectGame(game) {
+  function selectGame(game, config = {}) {
     if (!getView().isFacilitator) return;
     const round = state.round + 1;
     myCommit = null;
-    publish({ id: `select:${round}:${self}`, type: 'select-game', from: self, round, game });
+    publish({ id: `select:${round}:${self}`, type: 'select-game', from: self, round, game, config });
   }
 
   function backToLobby() {
