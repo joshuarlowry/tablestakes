@@ -53,7 +53,8 @@ if (roomCode) {
 $('createBtn').addEventListener('click', enter);
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') enter(); });
 $('copyBtn').addEventListener('click', async () => {
-  const url = inviteUrl();
+  syncInviteLink();
+  const url = $('inviteLinkInput').value;
   try { await navigator.clipboard.writeText(url); } catch { prompt('Copy this link:', url); }
   const t = $('toast');
   t.classList.add('show');
@@ -87,7 +88,13 @@ function enter() {
   $('entry').classList.add('hidden');
   $('room').classList.add('visible');
   $('roomCodeText').textContent = roomCode;
+  syncInviteLink();
   render();
+}
+
+function syncInviteLink() {
+  if (!roomCode || !inviteToken) return;
+  $('inviteLinkInput').value = inviteUrl();
 }
 
 /* ============ networking ============ */

@@ -212,6 +212,14 @@ button {
   letter-spacing: 0.08em;
 }
 
+.invite-link-row {
+  margin: -12px 0 30px;
+}
+.invite-link-row input {
+  font-size: 12px;
+  color: var(--brass);
+}
+
 /* players rail */
 .players {
   display: flex;
