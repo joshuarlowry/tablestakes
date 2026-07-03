@@ -1,5 +1,16 @@
 import {joinRoom, selfId} from '@trystero-p2p/nostr';
 
+const NOSTR_RELAY_URLS = [
+  'wss://nos.lol',
+  'wss://relay.nostr.place',
+  'wss://relay.libernet.app',
+  'wss://relay.mostr.pub',
+  'wss://relay.mostro.network',
+  'wss://purplerelay.com',
+  'wss://nostr-01.yakihonne.com',
+  'wss://relay.sigit.io',
+];
+
 const now = () => performance.now();
 const encoder = new TextEncoder();
 
@@ -176,7 +187,7 @@ export function createTrysteroNostrTransport({
       password: `${appNamespace}:${roomId}:${inviteToken}`,
       relayConfig: {
         manualReconnection: true,
-        redundancy: 4,
+        urls: NOSTR_RELAY_URLS,
       },
       rtcConfig,
     },
