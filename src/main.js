@@ -2,6 +2,7 @@ import {
   createSecureNostrInvite,
   createTrysteroNostrTransport,
 } from './transports/trysteroNostr.js';
+import {buildRtcConfig} from './transports/turnConfig.js';
 import './style.css';
 
 /* ============ config & helpers ============ */
@@ -10,20 +11,6 @@ const $ = id => document.getElementById(id);
 const hashParams = () => new URLSearchParams(location.hash.replace(/^#/, ''));
 const inviteUrl = () =>
   `${location.origin}${location.pathname}?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(inviteToken)}`;
-const OPEN_RELAY_ICE_SERVERS = [
-  {urls: 'stun:openrelay.metered.ca:80'},
-  {
-    urls: [
-      'turn:openrelay.metered.ca:80',
-      'turn:openrelay.metered.ca:80?transport=tcp',
-      'turn:openrelay.metered.ca:443',
-      'turn:openrelay.metered.ca:443?transport=tcp',
-      'turns:openrelay.metered.ca:443',
-    ],
-    username: 'openrelayproject',
-    credential: 'openrelayproject',
-  },
-];
 const readSetting = (key, fallback = '') =>
   localStorage.getItem(`tablestakes:${key}`) ?? fallback;
 const writeSetting = (key, value) =>
@@ -90,7 +77,7 @@ $('copyBtn').addEventListener('click', async () => {
 });
 $('leaveBtn').addEventListener('click', leaveRoom);
 
-function enter() {
+async function enter() {
   myName = $('nameInput').value.trim();
   if (!myName) { $('nameInput').focus(); return; }
   writeSetting('useTurn', $('useTurnInput').checked ? '1' : '0');
@@ -109,12 +96,15 @@ function enter() {
     }
     history.replaceState(null, '', inviteUrl());
   }
+  $('createBtn').disabled = true;
   try {
-    connect();
+    await connect();
   } catch (error) {
     $('transportError').textContent = error.message;
+    $('createBtn').disabled = false;
     return;
   }
+  $('createBtn').disabled = false;
   names[localPeerId] = myName;
   $('entry').classList.add('hidden');
   $('room').classList.add('visible');
@@ -168,12 +158,13 @@ function leaveRoom() {
 }
 
 /* ============ networking ============ */
-function connect() {
+async function connect() {
+  const rtcConfig = await makeRtcConfig();
   transport = createTrysteroNostrTransport({
     roomId: roomCode,
     inviteToken,
     appNamespace: APP_NAMESPACE,
-    rtcConfig: makeRtcConfig(),
+    rtcConfig,
     onPeerJoin: handlePeerJoin,
     onPeerLeave: handlePeerLeave,
     onHealth: renderHealth,
@@ -249,12 +240,19 @@ function connect() {
   setConn(false); // until first peer arrives
 }
 
-function makeRtcConfig() {
-  if (!$('useTurnInput').checked) return undefined;
-  return {
-    iceServers: OPEN_RELAY_ICE_SERVERS,
-    iceTransportPolicy: $('forceRelayInput').checked ? 'relay' : 'all',
-  };
+async function makeRtcConfig() {
+  const useTurn = $('useTurnInput').checked;
+  const forceRelay = $('forceRelayInput').checked;
+  if (!useTurn) return undefined;
+  try {
+    return await buildRtcConfig({useTurn, forceRelay});
+  } catch (error) {
+    // Relay was requested but the provider couldn't supply servers. Don't block
+    // the join — fall back to a direct connection and surface why.
+    $('transportError').textContent =
+      `Relay unavailable (${error.message}). Connecting directly.`;
+    return undefined;
+  }
 }
 
 function handlePeerJoin(peerId) {
