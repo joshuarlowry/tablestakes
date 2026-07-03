@@ -14,11 +14,25 @@
  * `this`) MUST NOT be relied on across messages — the instance can be evicted
  * between them. Peer identity lives in `ws.serializeAttachment`, and the
  * current peer list is always recomputed via `state.getWebSockets()`.
+ *
+ * Idle cleanup: an alarm is (re)scheduled on every message, IDLE_MS out. A
+ * room that's genuinely idle that whole window (not just quiet — someone
+ * picking a game counts as idle too, which is fine, they'll re-trigger it on
+ * their next action) gets its storage wiped in `alarm()`. This is generous
+ * enough that a team stepping away and coming back later still works — it's
+ * just housekeeping for rooms nobody is coming back to, not a session limit.
  */
+const IDLE_MS = 12 * 60 * 60 * 1000; // 12h since last activity
+
 export class RoomDO {
   constructor(state, env) {
     this.state = state;
     this.env = env;
+  }
+
+  scheduleIdleAlarm() {
+    // Don't await from message handlers — cleanup timing isn't message-critical.
+    this.state.storage.setAlarm(Date.now() + IDLE_MS).catch(() => {});
   }
 
   async fetch(request) {
@@ -50,6 +64,7 @@ export class RoomDO {
   async webSocketMessage(ws, raw) {
     let data;
     try { data = JSON.parse(raw); } catch { return; }
+    this.scheduleIdleAlarm();
 
     if (data.t === 'hello') {
       const peerId = typeof data.id === 'string' ? data.id.slice(0, 40) : '';
@@ -90,5 +105,14 @@ export class RoomDO {
   }
   async webSocketError(ws) {
     await this.webSocketClose(ws);
+  }
+
+  async alarm() {
+    // Genuinely idle for IDLE_MS: close any lingering sockets (there normally
+    // won't be any left) and wipe storage so an abandoned room costs nothing.
+    for (const ws of this.state.getWebSockets()) {
+      try { ws.close(4000, 'room idle'); } catch { /* already gone */ }
+    }
+    await this.state.storage.deleteAll();
   }
 }
