@@ -23,6 +23,8 @@ let localPeerId = null;
 let myName = '';
 let hostId = null;                 // room creator by default, transferable by host
 const names = {};                  // peerId -> name (includes self)
+const departed = new Set();
+const directPeers = new Set();
 let sendHello, sendPick, sendState, sendHost;
 let hostRecoveryTimer = null;
 
@@ -116,7 +118,9 @@ function connect() {
   sendHello = transport.makeAction('hello', (payload, peerId) => {
     const hello = normalizeHello(payload);
     names[peerId] = hello.name;
+    departed.delete(peerId);
     acceptHost(hello.hostId);
+    if (iAmHost()) broadcast();
     scheduleHostRecovery();
     render();
   });
@@ -133,7 +137,7 @@ function connect() {
         state.hostId &&
         state.hostId !== localPeerId &&
         state.hostId === peerId &&
-        playerIds().length <= 1;
+        directPeers.size <= 1;
 
       if (!connectedToAnotherHost) return;
       acceptHost(state.hostId, true);
@@ -142,6 +146,7 @@ function connect() {
       if (hostId && peerId !== hostId) return;
       acceptHost(state.hostId, peerId === hostId);
     }
+    applyRoster(state.roster);
     G = state.gameState;
     scheduleHostRecovery();
     if (G.phase !== 'pick') myPick = null;
@@ -153,6 +158,7 @@ function connect() {
     if (message?.from !== hostId || peerId !== hostId) return;
     setHost(message.to);
     if (message.gameState) {
+      applyRoster(message.roster);
       G = message.gameState;
       myPick = null;
     }
@@ -167,6 +173,7 @@ function handlePeerJoin(peerId) {
     setTimeout(() => handlePeerJoin(peerId), 0);
     return;
   }
+  directPeers.add(peerId);
   sendHello(makeHello(), peerId);
   if (iAmHost()) sendState(makeStateMessage(), peerId);  // catch the newcomer up
   scheduleHostRecovery();
@@ -175,11 +182,16 @@ function handlePeerJoin(peerId) {
 }
 
 function handlePeerLeave(peerId) {
-  delete names[peerId];
+  directPeers.delete(peerId);
   delete hostPicks[peerId];
   const wasHost = peerId === hostId;
-  if (wasHost) electFallbackHost();
+  if (wasHost) {
+    departed.add(peerId);
+    hostId = null;
+  }
   if (iAmHost()) {
+    departed.add(peerId);
+    delete names[peerId];
     G.locked = G.locked.filter(id => id !== peerId);
     if (wasHost && G.phase === 'pick') {
       // host changed mid-round: keep it simple, restart the round
@@ -195,6 +207,9 @@ function handlePeerLeave(peerId) {
 }
 
 function playerIds() { return Object.keys(names).sort(); }
+function connectedPeerIds() {
+  return playerIds().filter(id => !departed.has(id));
+}
 function makeHello() {
   return {name: myName, hostId};
 }
@@ -208,16 +223,24 @@ function normalizeHello(payload) {
   return {name: String(payload).slice(0, 20) || 'peer', hostId: null};
 }
 function makeStateMessage() {
-  return {hostId, gameState: G};
+  return {hostId, roster: names, gameState: G};
 }
 function normalizeState(message) {
   if (message && typeof message === 'object' && 'gameState' in message) {
     return {
       hostId: typeof message.hostId === 'string' ? message.hostId : null,
+      roster: message.roster && typeof message.roster === 'object' ? message.roster : null,
       gameState: message.gameState,
     };
   }
-  return {hostId: null, gameState: message};
+  return {hostId: null, roster: null, gameState: message};
+}
+function applyRoster(roster) {
+  if (!roster) return;
+  for (const [id, name] of Object.entries(roster)) {
+    if (!departed.has(id)) names[id] = String(name).slice(0, 20) || 'peer';
+  }
+  names[localPeerId] = myName;
 }
 function acceptHost(candidateHostId, replace = false) {
   if (!candidateHostId || (hostId && !replace)) return;
@@ -230,7 +253,7 @@ function setHost(nextHostId) {
   clearHostRecovery();
 }
 function electFallbackHost() {
-  hostId = playerIds()[0] ?? localPeerId;
+  hostId = connectedPeerIds()[0] ?? localPeerId;
   clearHostRecovery();
 }
 function clearHostRecovery() {
@@ -238,10 +261,10 @@ function clearHostRecovery() {
   hostRecoveryTimer = null;
 }
 function scheduleHostRecovery() {
-  if (hostId || playerIds().length < 2 || hostRecoveryTimer) return;
+  if (hostId || connectedPeerIds().length < 2 || hostRecoveryTimer) return;
   hostRecoveryTimer = setTimeout(() => {
     hostRecoveryTimer = null;
-    if (hostId || playerIds().length < 2) return;
+    if (hostId || connectedPeerIds().length < 2) return;
     electFallbackHost();
     if (iAmHost()) broadcast();
     render();
@@ -250,7 +273,7 @@ function scheduleHostRecovery() {
 function iAmHost() { return hostId === localPeerId; }
 function setConn(live) {
   $('conn').classList.toggle('live', live);
-  $('connText').textContent = live ? `${playerIds().length} connected` : 'waiting for peers';
+  $('connText').textContent = live ? `${connectedPeerIds().length} connected` : 'waiting for peers';
 }
 
 function renderTransportError(error) {
@@ -303,7 +326,7 @@ function hostRecordPick(peerId, choice) {
 
 function hostCheckAllIn() {
   if (G.phase !== 'pick') return;
-  const ids = playerIds();
+  const ids = connectedPeerIds();
   if (ids.length > 1 && ids.every(id => G.locked.includes(id))) {
     G.phase = 'reveal';
     G.results = {...hostPicks};
@@ -322,7 +345,7 @@ function transferHost(nextHostId) {
   for (const k of Object.keys(hostPicks)) delete hostPicks[k];
   myPick = null;
   setHost(nextHostId);
-  sendHost({from: localPeerId, to: nextHostId, gameState: G});
+  sendHost({from: localPeerId, to: nextHostId, roster: names, gameState: G});
   broadcast();
 }
 
@@ -351,14 +374,14 @@ function esc(s) {
 }
 
 function renderPlayers() {
-  $('players').innerHTML = playerIds().map(id => `
+  $('players').innerHTML = connectedPeerIds().map(id => `
     <div class="player ${G.locked.includes(id) ? 'locked' : ''} ${id === localPeerId ? 'me' : ''}">
       <span class="pip"></span>
       <span>${esc(names[id] || '…')}</span>
       ${id === hostId ? '<span class="tag">HOST</span>' : ''}
       ${iAmHost() && id !== localPeerId ? `<button class="mini-action" data-host="${esc(id)}">Make host</button>` : ''}
     </div>`).join('');
-  setConn(playerIds().length > 1);
+  setConn(connectedPeerIds().length > 1);
 }
 
 function viewLobby() {
@@ -386,7 +409,7 @@ function viewLobby() {
 
 function viewPick() {
   const locked = G.locked.includes(localPeerId);
-  const remaining = playerIds().length - G.locked.length;
+  const remaining = connectedPeerIds().length - G.locked.length;
 
   if (G.game === 'rps') {
     return `
