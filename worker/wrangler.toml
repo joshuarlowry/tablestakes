@@ -12,3 +12,13 @@ CREDENTIAL_TTL = "86400"
 #   wrangler secret put TURN_KEY_ID
 #   wrangler secret put TURN_KEY_API_TOKEN
 # (CI sets these automatically from GitHub secrets — see the deploy workflow.)
+
+# TEMP smoke test — proves the account/token we already have can provision a
+# Durable Object namespace. Remove this block if not, or build on it if so.
+[[durable_objects.bindings]]
+name = "ROOM_DO"
+class_name = "RoomDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["RoomDO"]
