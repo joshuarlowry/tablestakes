@@ -24,6 +24,7 @@ let myName = '';
 let hostId = null;                 // room creator by default, transferable by host
 const names = {};                  // peerId -> name (includes self)
 let sendHello, sendPick, sendState, sendHost;
+let hostRecoveryTimer = null;
 
 // host-authoritative game state (mirrored to peers via 'state')
 let G = {
@@ -116,6 +117,7 @@ function connect() {
     const hello = normalizeHello(payload);
     names[peerId] = hello.name;
     acceptHost(hello.hostId);
+    scheduleHostRecovery();
     render();
   });
 
@@ -130,6 +132,7 @@ function connect() {
     const state = normalizeState(message);
     acceptHost(state.hostId, peerId === hostId);
     G = state.gameState;
+    scheduleHostRecovery();
     if (G.phase !== 'pick') myPick = null;
     if (G.phase === 'pick' && !G.locked.includes(localPeerId)) {/* keep my un-locked pick */}
     render();
@@ -155,6 +158,7 @@ function handlePeerJoin(peerId) {
   }
   sendHello(makeHello(), peerId);
   if (iAmHost()) sendState(makeStateMessage(), peerId);  // catch the newcomer up
+  scheduleHostRecovery();
   setConn(true);
   render();
 }
@@ -174,6 +178,7 @@ function handlePeerLeave(peerId) {
       broadcast();
     }
   }
+  scheduleHostRecovery();
   if (Object.keys(names).length === 1) setConn(false);
   render();
 }
@@ -206,13 +211,30 @@ function normalizeState(message) {
 function acceptHost(candidateHostId, replace = false) {
   if (!candidateHostId || (hostId && !replace)) return;
   hostId = candidateHostId;
+  clearHostRecovery();
 }
 function setHost(nextHostId) {
   if (!nextHostId || !names[nextHostId]) return;
   hostId = nextHostId;
+  clearHostRecovery();
 }
 function electFallbackHost() {
   hostId = playerIds()[0] ?? localPeerId;
+  clearHostRecovery();
+}
+function clearHostRecovery() {
+  if (hostRecoveryTimer) clearTimeout(hostRecoveryTimer);
+  hostRecoveryTimer = null;
+}
+function scheduleHostRecovery() {
+  if (hostId || playerIds().length < 2 || hostRecoveryTimer) return;
+  hostRecoveryTimer = setTimeout(() => {
+    hostRecoveryTimer = null;
+    if (hostId || playerIds().length < 2) return;
+    electFallbackHost();
+    if (iAmHost()) broadcast();
+    render();
+  }, 3000);
 }
 function iAmHost() { return hostId === localPeerId; }
 function setConn(live) {
