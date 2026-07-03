@@ -39,6 +39,7 @@ let myPick = null;
 /* ============ boot ============ */
 const params = new URLSearchParams(location.search);
 let roomCode = params.get('room');
+const createdRoom = !roomCode;
 let inviteToken = hashParams().get('token') || params.get('token') || '';
 
 if (inviteToken) $('inviteTokenInput').value = inviteToken;
@@ -109,10 +110,12 @@ function connect() {
     onError: renderTransportError,
   });
   localPeerId = transport.localPeerId;
+  if (createdRoom) hostId = localPeerId;
 
-  sendHello = transport.makeAction('hello', (name, peerId) => {
-    names[peerId] = String(name).slice(0, 20);
-    electHost();
+  sendHello = transport.makeAction('hello', (payload, peerId) => {
+    const hello = normalizeHello(payload);
+    names[peerId] = hello.name;
+    acceptHost(hello.hostId);
     render();
   });
 
@@ -121,15 +124,16 @@ function connect() {
     hostRecordPick(peerId, choice);
   });
 
-  sendState = transport.makeAction('state', (state) => {
+  sendState = transport.makeAction('state', (message) => {
     if (iAmHost()) return;                // host is the source of truth
-    G = state;
+    const state = normalizeState(message);
+    acceptHost(state.hostId);
+    G = state.gameState;
     if (G.phase !== 'pick') myPick = null;
     if (G.phase === 'pick' && !G.locked.includes(localPeerId)) {/* keep my un-locked pick */}
     render();
   });
 
-  electHost();
   setConn(false); // until first peer arrives
 }
 
@@ -138,9 +142,8 @@ function handlePeerJoin(peerId) {
     setTimeout(() => handlePeerJoin(peerId), 0);
     return;
   }
-  sendHello(myName, peerId);
-  electHost();
-  if (iAmHost()) sendState(G, peerId);  // catch the newcomer up
+  sendHello(makeHello(), peerId);
+  if (iAmHost()) sendState(makeStateMessage(), peerId);  // catch the newcomer up
   setConn(true);
   render();
 }
@@ -149,7 +152,7 @@ function handlePeerLeave(peerId) {
   delete names[peerId];
   delete hostPicks[peerId];
   const wasHost = peerId === hostId;
-  electHost();
+  if (wasHost) electFallbackHost();
   if (iAmHost()) {
     G.locked = G.locked.filter(id => id !== peerId);
     if (wasHost && G.phase === 'pick') {
@@ -165,7 +168,37 @@ function handlePeerLeave(peerId) {
 }
 
 function playerIds() { return Object.keys(names).sort(); }
-function electHost() { hostId = playerIds()[0] ?? localPeerId; }
+function makeHello() {
+  return {name: myName, hostId};
+}
+function normalizeHello(payload) {
+  if (payload && typeof payload === 'object') {
+    return {
+      name: String(payload.name || '').slice(0, 20) || 'peer',
+      hostId: typeof payload.hostId === 'string' ? payload.hostId : null,
+    };
+  }
+  return {name: String(payload).slice(0, 20) || 'peer', hostId: null};
+}
+function makeStateMessage() {
+  return {hostId, gameState: G};
+}
+function normalizeState(message) {
+  if (message && typeof message === 'object' && 'gameState' in message) {
+    return {
+      hostId: typeof message.hostId === 'string' ? message.hostId : null,
+      gameState: message.gameState,
+    };
+  }
+  return {hostId: null, gameState: message};
+}
+function acceptHost(candidateHostId) {
+  if (!candidateHostId || hostId) return;
+  hostId = candidateHostId;
+}
+function electFallbackHost() {
+  hostId = playerIds()[0] ?? localPeerId;
+}
 function iAmHost() { return hostId === localPeerId; }
 function setConn(live) {
   $('conn').classList.toggle('live', live);
@@ -198,7 +231,7 @@ function shortId(peerId) {
 }
 
 /* ============ host logic ============ */
-function broadcast() { if (transport) sendState(G); render(); }
+function broadcast() { if (transport) sendState(makeStateMessage()); render(); }
 
 function selectGame(game) {
   if (!iAmHost()) return;
@@ -240,6 +273,7 @@ function lockPick(choice) {
   if (G.phase !== 'pick' || G.locked.includes(localPeerId)) return;
   myPick = choice;
   if (iAmHost()) hostRecordPick(localPeerId, choice);
+  else if (!hostId) render();
   else { sendPick(choice, hostId); render(); }
 }
 
