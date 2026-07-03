@@ -55,6 +55,15 @@ export function bindLobby(view, client, ui, rerender) {
       }
     }));
 
+  // Keep the draft in sync with every keystroke — belt-and-suspenders with
+  // the gameClient no-op-notify skip, so even a legitimate re-render (a peer's
+  // first presence, say) repopulates the form instead of wiping it.
+  if (ui.configGame) {
+    const gameUi = uiFor(ui.configGame);
+    document.querySelectorAll('#stage input, #stage textarea').forEach(el =>
+      el.addEventListener('input', () => { ui.configDraft = gameUi.readConfig(); }));
+  }
+
   const start = document.getElementById('startConfiguredBtn');
   if (start) start.addEventListener('click', () => {
     const id = ui.configGame;

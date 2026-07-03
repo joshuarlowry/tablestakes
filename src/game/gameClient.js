@@ -40,6 +40,7 @@ export function createGameClient({
   let myCommit = null;            // { round, pick, nonce } for auto-reveal
   let presenceSeq = 0;
   const listeners = new Set();
+  let lastNotifiedJson = null;    // skip no-op notifies so the UI doesn't re-render
 
   const gossip = createGossip(transport, { onDeliver: apply });
   transport.onPeerLeave(peerId => { apply({ id: `leave:${peerId}`, type: 'leave', from: peerId }); });
@@ -59,8 +60,17 @@ export function createGameClient({
     return activeIds().filter(id => !state.departed[id]);
   }
 
+  // Heartbeats (every 5s) and ticks (every 2s) call notify() far more often
+  // than the game state actually changes. Re-rendering on a no-op notify
+  // would blow away live DOM (e.g. a focused input mid-keystroke, dropping
+  // mobile keyboards) for no reason, so skip the callback unless the derived
+  // view actually differs from what listeners last saw.
   function notify() {
     const view = getView();
+    let json;
+    try { json = canonicalize(view); } catch { json = null; } // never block a real update on this
+    if (json !== null && json === lastNotifiedJson) return;
+    lastNotifiedJson = json;
     for (const fn of listeners) fn(view);
   }
 

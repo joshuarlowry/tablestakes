@@ -10,7 +10,9 @@ export default {
   },
   readConfig() {
     const text = document.getElementById('cfgOptions')?.value || '';
-    return { options: text.split('\n').map(s => s.trim()).filter(Boolean) };
+    // Keep the raw text alongside the parsed list so this round-trips through
+    // configForm(draft) unchanged if a re-render happens mid-edit.
+    return { optionsText: text, options: text.split('\n').map(s => s.trim()).filter(Boolean) };
   },
   configValid: cfg => cfg.options.length >= 2,
 
