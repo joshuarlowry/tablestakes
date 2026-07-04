@@ -25,6 +25,8 @@ export function initialState() {
     reveals: {},    // round -> { peerId -> {pick, nonce} }
     forced: {},     // round -> true
     presenceSeq: {}, // peerId -> highest seq seen
+    cards: {},          // round -> { cardId -> {ver, from, text, col, order, author, deleted, time?} }
+    cardsRevealed: {},  // round -> true (blind-mode retro/AAR boards)
     // Facilitator is an explicit last-writer-wins register: creator seeds it,
     // handoff/recovery bump the term. Higher term wins; ties broken by smaller
     // holder id — so every peer converges without an election race.
@@ -91,6 +93,24 @@ export function reduce(state, event) {
         (event.term === cur.term && (cur.holder == null || event.holder < cur.holder));
       return wins ? { ...state, facilitator: { holder: event.holder, term: event.term } } : state;
     }
+    case 'card': {
+      const roundCards = state.cards[event.round] || {};
+      const cur = roundCards[event.cardId];
+      // Whole-card last-writer-wins by an explicit version counter (same
+      // pattern as the facilitator register) — ties broken by smaller issuer.
+      const wins = !cur || event.ver > cur.ver || (event.ver === cur.ver && event.from < cur.from);
+      if (!wins) return state;
+      const card = event.card && typeof event.card === 'object' ? event.card : {};
+      return {
+        ...state,
+        cards: {
+          ...state.cards,
+          [event.round]: { ...roundCards, [event.cardId]: { ver: event.ver, from: event.from, ...card } },
+        },
+      };
+    }
+    case 'reveal-cards':
+      return { ...state, cardsRevealed: { ...state.cardsRevealed, [event.round]: true } };
     case 'leave':
       return { ...state, departed: { ...state.departed, [event.from]: true } };
     default:
@@ -107,6 +127,24 @@ function dropKey(obj, key) {
 
 export function reduceAll(events, state = initialState()) {
   return events.reduce(reduce, state);
+}
+
+export function compareCards(a, b) {
+  if (a.order < b.order) return -1;
+  if (a.order > b.order) return 1;
+  return a.cardId < b.cardId ? -1 : a.cardId > b.cardId ? 1 : 0; // defensive tiebreak
+}
+
+function deriveBoard(state, gameDef, config, round) {
+  const roundCards = state.cards[round] || {};
+  const columns = gameDef.columnsFor(config).map(col => ({
+    ...col,
+    cards: Object.entries(roundCards)
+      .filter(([, c]) => c.col === col.key && !c.deleted)
+      .map(([cardId, c]) => ({ cardId, ...c }))
+      .sort(compareCards),
+  }));
+  return { columns, cardsRevealed: !!state.cardsRevealed[round], privacy: config.privacy };
 }
 
 /** Facilitator is deterministic: smallest live peer id. Everyone computes it identically. */
@@ -139,6 +177,26 @@ export function deriveView(state, selfId, activeIds, verified = {}) {
 
   const gameDef = state.game ? getGame(state.game) : null;
   const config = gameDef ? gameDef.normalizeConfig(state.config) : {};
+
+  if (gameDef && gameDef.mode === 'board') {
+    return {
+      round: r,
+      game: state.game,
+      config,
+      phase: 'board',
+      participants,
+      names: state.names,
+      facilitator,
+      isFacilitator: selfId === facilitator,
+      committedIds: [],
+      lockedCount: 0,
+      remaining: participants.length,
+      iAmCommitted: false,
+      revealPicks: null,
+      result: null,
+      board: deriveBoard(state, gameDef, config, r),
+    };
+  }
 
   // Unknown game id (garbage or newer client version) renders as lobby rather
   // than a permanently stuck pick phase.

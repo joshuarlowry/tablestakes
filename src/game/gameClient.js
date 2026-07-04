@@ -8,10 +8,11 @@
  * Timers are NOT owned here — the caller drives `heartbeat()` and `tick(now)` —
  * keeping the controller deterministic and testable.
  */
-import { reduce, initialState, deriveView, facilitatorOf } from './gameState.js';
+import { reduce, initialState, deriveView, facilitatorOf, compareCards } from './gameState.js';
 import { createGossip } from '../net/gossip.js';
 import { commit as makeCommit, verify, sha256Hex } from './commitReveal.js';
 import { canonicalize } from './canonical.js';
+import { orderBetween } from './order.js';
 
 const LIVENESS_MS = 15000;
 
@@ -30,6 +31,8 @@ export function createGameClient({
   livenessMs = LIVENESS_MS,
   autoVerify = false,
   isCreator = false,
+  roomId = 'default',
+  storage = typeof localStorage !== 'undefined' ? localStorage : null,
 }) {
   const self = transport.localPeerId;
   let state = initialState();
@@ -39,8 +42,31 @@ export function createGameClient({
   const revealedRounds = new Set();
   let myCommit = null;            // { round, pick, nonce } for auto-reveal
   let presenceSeq = 0;
+  let cardCounter = 0;
   const listeners = new Set();
   let lastNotifiedJson = null;    // skip no-op notifies so the UI doesn't re-render
+
+  // Blind-mode board cards not yet published (see games/retro.js docs). Only
+  // ever holds this client's own drafts; stashed to `storage` so a refresh
+  // doesn't lose an unrevealed retro card mid-session.
+  const localDraftCards = new Map(); // cardId -> {text, col, order, author, deleted}
+  const draftStashKey = `tablestakes:drafts:${roomId}`;
+  function saveDraftStash() {
+    if (!storage) return;
+    try { storage.setItem(draftStashKey, JSON.stringify([...localDraftCards])); } catch { /* best effort */ }
+  }
+  function loadDraftStash() {
+    if (!storage) return;
+    try {
+      const raw = storage.getItem(draftStashKey);
+      if (raw) for (const [id, card] of JSON.parse(raw)) localDraftCards.set(id, card);
+    } catch { /* best effort */ }
+  }
+  function clearDraftStash() {
+    localDraftCards.clear();
+    try { storage?.removeItem(draftStashKey); } catch { /* best effort */ }
+  }
+  loadDraftStash();
 
   const gossip = createGossip(transport, { onDeliver: apply });
   transport.onPeerLeave(peerId => { apply({ id: `leave:${peerId}`, type: 'leave', from: peerId }); });
@@ -81,6 +107,14 @@ export function createGameClient({
     if (ev.from) lastHeard.set(ev.from, now());
     if (ev.type === 'reveal' && ev.from !== self) {
       pendingReveals.push({ round: ev.round, from: ev.from, pick: ev.pick, nonce: ev.nonce });
+    }
+    if (ev.type === 'reveal-cards' && ev.round === state.round) {
+      // Publish every local draft now that the facilitator has revealed —
+      // fires for the facilitator's own reveal too (gossip echoes locally).
+      for (const [cardId, card] of localDraftCards) {
+        publish({ id: `card:${cardId}:1`, type: 'card', from: self, round: ev.round, cardId, ver: 1, card });
+      }
+      clearDraftStash();
     }
     maybeAutoReveal();
     maybeRecoverFacilitator();
@@ -144,7 +178,31 @@ export function createGameClient({
   }
 
   function getView() {
-    return deriveView(state, self, activeIds(), verified);
+    const view = deriveView(state, self, activeIds(), verified);
+    if (view.board) {
+      // Merge in this client's own unrevealed drafts (never gossiped, so
+      // deriveView can't see them — that's the entire blind-mode mechanism)
+      // and stamp `mine` on every card so the UI can gate edit/delete to the
+      // author while leaving move/reorder open to everyone.
+      const draftsByCol = new Map();
+      if (!view.board.cardsRevealed) {
+        for (const [cardId, card] of localDraftCards) {
+          const list = draftsByCol.get(card.col) || [];
+          list.push({ cardId, from: self, ver: 0, pending: true, ...card });
+          draftsByCol.set(card.col, list);
+        }
+      }
+      view.board = {
+        ...view.board,
+        columns: view.board.columns.map(col => ({
+          ...col,
+          cards: [...col.cards, ...(draftsByCol.get(col.key) || [])]
+            .map(c => ({ ...c, mine: c.author === self }))
+            .sort(compareCards),
+        })),
+      };
+    }
+    return view;
   }
 
   /* ---- facilitator register ---- */
@@ -225,12 +283,85 @@ export function createGameClient({
     publish({ id: `leave:${self}`, type: 'leave', from: self });
   }
 
+  /* ---- board (retro/AAR) cards ---- */
+  function isBlindPreReveal(view) {
+    return view.board && view.board.privacy === 'blind' && !view.board.cardsRevealed;
+  }
+  function publishCard(cardId, ver, card) {
+    publish({ id: `card:${cardId}:${ver}`, type: 'card', from: self, round: state.round, cardId, ver, card });
+  }
+
+  function addCard(col, text, extra = {}) {
+    const view = getView();
+    if (!view.board) return null;
+    const cardId = `${self}:${cardCounter++}`;
+    const colCards = view.board.columns.find(c => c.key === col)?.cards || [];
+    const order = orderBetween(colCards.length ? colCards[colCards.length - 1].order : '', '');
+    const card = { text: String(text).slice(0, 280), col, order, author: self, deleted: false, ...extra };
+    if (isBlindPreReveal(view)) {
+      localDraftCards.set(cardId, card);
+      saveDraftStash();
+      notify();
+    } else {
+      publishCard(cardId, 1, card);
+    }
+    return cardId;
+  }
+
+  function editCard(cardId, text) {
+    if (localDraftCards.has(cardId)) {
+      const d = localDraftCards.get(cardId);
+      if (d.author !== self) return;
+      localDraftCards.set(cardId, { ...d, text: String(text).slice(0, 280) });
+      saveDraftStash();
+      notify();
+      return;
+    }
+    const existing = state.cards[state.round]?.[cardId];
+    if (!existing || existing.author !== self) return;
+    publishCard(cardId, existing.ver + 1, { ...existing, text: String(text).slice(0, 280) });
+  }
+
+  function moveCard(cardId, col, order) {
+    if (localDraftCards.has(cardId)) {
+      const d = localDraftCards.get(cardId);
+      localDraftCards.set(cardId, { ...d, col, order });
+      saveDraftStash();
+      notify();
+      return;
+    }
+    const existing = state.cards[state.round]?.[cardId];
+    if (!existing) return;
+    publishCard(cardId, existing.ver + 1, { ...existing, col, order });
+  }
+
+  function deleteCard(cardId) {
+    if (localDraftCards.has(cardId)) {
+      const d = localDraftCards.get(cardId);
+      if (d.author !== self) return;
+      localDraftCards.delete(cardId);
+      saveDraftStash();
+      notify();
+      return;
+    }
+    const existing = state.cards[state.round]?.[cardId];
+    if (!existing || existing.author !== self) return;
+    publishCard(cardId, existing.ver + 1, { ...existing, deleted: true });
+  }
+
+  function revealCards() {
+    const view = getView();
+    if (!view.isFacilitator || !view.board) return;
+    publish({ id: `reveal-cards:${state.round}`, type: 'reveal-cards', from: self, round: state.round });
+  }
+
   function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
   return {
     self,
     join, heartbeat, tick,
     lock, selectGame, backToLobby, forceReveal, leave, handOff,
+    addCard, editCard, moveCard, deleteCard, revealCards,
     processVerifications, getView, onChange,
     _debug: () => ({ state, verified }),
   };

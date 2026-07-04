@@ -73,7 +73,7 @@ async function enter() {
     onError: renderTransportError,
   });
 
-  client = createGameClient({ transport: port, name, autoVerify: true, isCreator: createdRoom });
+  client = createGameClient({ transport: port, name, autoVerify: true, isCreator: createdRoom, roomId: roomCode });
   client.onChange(render);
   client.join();
   heartbeatTimer = setInterval(() => client.heartbeat(), 5000);
@@ -144,6 +144,8 @@ function render(view) {
 
   if (view.phase === 'lobby' || !gameUi) {
     stage.innerHTML = renderLobby(view, uiLocal);
+  } else if (view.phase === 'board') {
+    stage.innerHTML = gameUi.renderBoard(view, uiLocal);
   } else if (view.phase === 'pick') {
     stage.innerHTML = gameUi.renderPick(view, uiLocal) + forceRevealAction(view);
   } else {
@@ -174,6 +176,8 @@ function rerender() { render(client.getView()); }
 function bindStage(view, gameUi) {
   if (view.phase === 'lobby' || !gameUi) {
     bindLobby(view, client, uiLocal, rerender);
+  } else if (view.phase === 'board') {
+    gameUi.bindBoard(view, client, uiLocal, rerender);
   } else if (view.phase === 'pick') {
     gameUi.bind(view, client, uiLocal, rerender);
     const force = $('forceBtn');
