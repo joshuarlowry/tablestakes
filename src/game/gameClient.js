@@ -12,7 +12,7 @@ import { reduce, initialState, deriveView, facilitatorOf, compareCards } from '.
 import { createGossip } from '../net/gossip.js';
 import { commit as makeCommit, verify, sha256Hex } from './commitReveal.js';
 import { canonicalize } from './canonical.js';
-import { orderBetween } from './order.js';
+import { orderBetween, orderForNew } from './order.js';
 
 const LIVENESS_MS = 15000;
 
@@ -296,7 +296,7 @@ export function createGameClient({
     if (!view.board) return null;
     const cardId = `${self}:${cardCounter++}`;
     const colCards = view.board.columns.find(c => c.key === col)?.cards || [];
-    const order = orderBetween(colCards.length ? colCards[colCards.length - 1].order : '', '');
+    const order = orderForNew(colCards.length ? colCards[colCards.length - 1].order : '', self);
     const card = { text: String(text).slice(0, 280), col, order, author: self, deleted: false, ...extra };
     if (isBlindPreReveal(view)) {
       localDraftCards.set(cardId, card);

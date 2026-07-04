@@ -40,6 +40,32 @@ describe('retro board reducer', () => {
     expect(twice).toEqual(once);
   });
 
+  it('event ver/from override stale ver/from echoed in the payload (regression)', () => {
+    // gameClient.moveCard publishes { ...existing, col, order } — the payload
+    // therefore carries the *previous* card's ver/from. The reducer must treat
+    // the event's ver/from as authoritative; otherwise stored ver never
+    // advances, the dedup id `card:<id>:<ver>` repeats, and gossip silently
+    // drops every move after the first (a card becomes movable only once).
+    const state = reduceAll([
+      selectRetro('a', 1),
+      card('a', 1, 'a:0', 1, { text: 'x', col: 'well', order: 'i', author: 'a', deleted: false }),
+      // b moves a's card; payload echoes stale ver:1/from:'a'
+      card('b', 1, 'a:0', 2, { text: 'x', col: 'well', order: 'r', author: 'a', deleted: false, ver: 1, from: 'a' }),
+    ]);
+    expect(state.cards[1]['a:0'].ver).toBe(2);
+    expect(state.cards[1]['a:0'].from).toBe('b');
+    expect(state.cards[1]['a:0'].order).toBe('r');
+    // A later move (ver 3) must still win — proving ver actually advanced.
+    const moved = reduceAll([
+      selectRetro('a', 1),
+      card('a', 1, 'a:0', 1, { text: 'x', col: 'well', order: 'i', author: 'a', deleted: false }),
+      card('b', 1, 'a:0', 2, { text: 'x', col: 'well', order: 'r', author: 'a', deleted: false, ver: 1, from: 'a' }),
+      card('b', 1, 'a:0', 3, { text: 'x', col: 'well', order: 'd', author: 'a', deleted: false, ver: 2, from: 'b' }),
+    ]);
+    expect(moved.cards[1]['a:0'].ver).toBe(3);
+    expect(moved.cards[1]['a:0'].order).toBe('d');
+  });
+
   it('a tombstoned card disappears from the board but stays deletable-idempotent', () => {
     const del = reduceAll([...events, card('b', 1, 'b:0', 2, { text: 'Too many meetings', col: 'not', order: 'm', author: 'b', deleted: true })]);
     const view = deriveView(del, 'a', ['a', 'b']);

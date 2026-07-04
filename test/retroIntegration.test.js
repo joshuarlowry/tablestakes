@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createMesh } from './meshSim.js';
 import { createGameClient } from '../src/game/gameClient.js';
+import { orderBetween } from '../src/game/order.js';
 
 function mk(mesh, id, name, isCreator = false) {
   return createGameClient({
@@ -100,6 +101,57 @@ describe('retro — everyone can rearrange', () => {
     const inActions = view => view.board.columns.find(c => c.key === 'actions').cards.map(c => c.text);
     expect(inActions(a.getView())).toEqual(['move me']);
     expect(inActions(b.getView())).toEqual(['move me']);
+  });
+
+  it('a card can be moved more than once (regression: dedup id must advance)', async () => {
+    // The reducer previously let the payload's stale ver override event.ver, so
+    // stored ver stuck at 1 and every move re-emitted the same gossip id
+    // `card:<id>:2` — dedup dropped every move after the first. This reproduces
+    // the exact 2-tab failure: the second move silently did nothing.
+    const { mesh, a, b } = pair();
+    [a, b].forEach(x => x.join());
+    await settle(mesh, [a, b]);
+    a.selectGame('retro', { template: 'wwda', privacy: 'live' });
+    await settle(mesh, [a, b]);
+    const cardId = a.addCard('well', 'wanderer');
+    await settle(mesh, [a, b]);
+
+    const colOf = (view, key) => view.board.columns.find(c => c.key === key).cards.map(c => c.text);
+    b.moveCard(cardId, 'not', 'm');
+    await settle(mesh, [a, b]);
+    expect(colOf(b.getView(), 'not')).toEqual(['wanderer']);
+
+    b.moveCard(cardId, 'actions', 'm'); // second move — must NOT be swallowed
+    await settle(mesh, [a, b]);
+    expect(colOf(a.getView(), 'actions')).toEqual(['wanderer']);
+    expect(colOf(b.getView(), 'actions')).toEqual(['wanderer']);
+    expect(colOf(a.getView(), 'not')).toEqual([]);
+  });
+
+  it('blind-mode cards from different authors get distinct keys and reorder cleanly', async () => {
+    // Both authors draft into the same column starting from ''. Without
+    // per-actor key tagging both first cards would be 'i' and collide on
+    // reveal, making a move between them impossible.
+    const { mesh, a, b } = pair();
+    [a, b].forEach(x => x.join());
+    await settle(mesh, [a, b]);
+    a.selectGame('retro', { template: 'wwda', privacy: 'blind' });
+    await settle(mesh, [a, b]);
+    a.addCard('well', 'A-card');
+    const bCard = b.addCard('well', 'B-card');
+    await settle(mesh, [a, b]);
+    a.revealCards();
+    await settle(mesh, [a, b]);
+
+    const keys = wellCards(a.getView()).map(c => c.order);
+    expect(new Set(keys).size).toBe(keys.length); // all distinct — no collision
+
+    // Move B-card to the very top; it must land before A-card on both peers.
+    const topKey = wellCards(a.getView())[0].order;
+    b.moveCard(bCard, 'well', orderBetween('', topKey));
+    await settle(mesh, [a, b]);
+    expect(wellCards(a.getView()).map(c => c.text)).toEqual(['B-card', 'A-card']);
+    expect(wellCards(b.getView()).map(c => c.text)).toEqual(['B-card', 'A-card']);
   });
 
   it('only the author can edit or delete a card', async () => {

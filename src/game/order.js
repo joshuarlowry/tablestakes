@@ -36,3 +36,23 @@ export function orderBetween(a = '', b = '') {
 
 /** First key with no lower bound (prepend). */
 export const FIRST_KEY = () => orderBetween('', '');
+
+/**
+ * A short, stable base-36 suffix derived from an actor id. In blind mode every
+ * client drafts cards locally starting from '', so each client's Nth card in a
+ * column independently gets the SAME fractional key ('i','r',…). On reveal those
+ * keys collide, and orderBetween(K, K) can't produce a value strictly between
+ * two equal keys — so "move past a same-keyed neighbor" silently no-ops. Tagging
+ * every freshly-created key with the author's suffix keeps them distinct so
+ * reordering always has room. Deterministic (no RNG) → convergence is preserved.
+ */
+function actorSuffix(actorId = '') {
+  let h = 0;
+  for (let i = 0; i < actorId.length; i++) h = (h * 31 + actorId.charCodeAt(i)) & 0xffff;
+  return (h % 1296).toString(BASE).padStart(2, '0');
+}
+
+/** Fractional key for a newly-created item after `prevOrder`, tagged per-actor. */
+export function orderForNew(prevOrder = '', actorId = '') {
+  return orderBetween(prevOrder, '') + actorSuffix(actorId);
+}

@@ -101,11 +101,14 @@ export function reduce(state, event) {
       const wins = !cur || event.ver > cur.ver || (event.ver === cur.ver && event.from < cur.from);
       if (!wins) return state;
       const card = event.card && typeof event.card === 'object' ? event.card : {};
+      // event.ver/event.from are authoritative (they drive LWW + the dedup id),
+      // so they must win even when the payload echoes stale ver/from fields
+      // copied off the prior card — hence spread `card` first, override after.
       return {
         ...state,
         cards: {
           ...state.cards,
-          [event.round]: { ...roundCards, [event.cardId]: { ver: event.ver, from: event.from, ...card } },
+          [event.round]: { ...roundCards, [event.cardId]: { ...card, ver: event.ver, from: event.from } },
         },
       };
     }
