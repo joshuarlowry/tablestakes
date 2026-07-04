@@ -3,6 +3,7 @@ import { createGameClient } from './game/gameClient.js';
 import { $, esc } from './ui/dom.js';
 import { renderLobby, bindLobby } from './ui/lobby.js';
 import { uiFor } from './ui/registry.js';
+import { gameList } from './game/registry.js';
 import './style.css';
 
 /* ============ config & helpers ============ */
@@ -22,6 +23,7 @@ let heartbeatTimer = null;
 let tickTimer = null;
 
 /* ============ boot ============ */
+renderGamesTease();
 const params = new URLSearchParams(location.search);
 roomCode = params.get('room');
 createdRoom = !roomCode;
@@ -84,6 +86,18 @@ async function enter() {
   $('roomCodeText').textContent = roomCode;
   syncInviteLink();
   render(client.getView());
+}
+
+function renderGamesTease() {
+  const grid = $('gamesTeaseGrid');
+  if (!grid) return;
+  // Driven straight off the registry so the entry-page tease can never drift
+  // out of sync with the games that actually ship.
+  grid.innerHTML = gameList.map(g => `
+    <div class="tease-card" title="${esc(g.description)}">
+      <span class="tease-glyphs">${g.glyphs}</span>
+      <span class="tease-name">${esc(g.label)}</span>
+    </div>`).join('');
 }
 
 function syncInviteLink() {
