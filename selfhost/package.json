@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Cloudflare-free WebSocket relay for self-hosting TableStakes",
-  "bin": { "tablestakes-relay": "relay.js" },
+  "bin": {
+    "tablestakes-relay": "relay.js"
+  },
   "scripts": {
     "start": "node relay.js"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.21.0"
   }
 }
