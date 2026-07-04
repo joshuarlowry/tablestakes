@@ -6,6 +6,7 @@ import ranked from './games/ranked.js';
 import health from './games/health.js';
 import turn from './games/turn.js';
 import retro from './games/retro.js';
+import aar from './games/aar.js';
 
-export const uiRegistry = { rps, f2f, points, motion, ranked, health, turn, retro };
+export const uiRegistry = { rps, f2f, points, motion, ranked, health, turn, retro, aar };
 export const uiFor = id => uiRegistry[id] || null;

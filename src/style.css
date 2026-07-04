@@ -683,3 +683,23 @@ textarea:focus { border-color: var(--brass); }
 }
 .bc-add input:focus { border-color: var(--brass); border-style: solid; }
 .bc-add input::placeholder { color: #55503f; }
+.bc-add { display: flex; flex-direction: column; gap: 6px; }
+
+/* --- AAR timeline extras --- */
+.board-col-timeline { border-color: rgba(201,168,106,0.35); }
+.bc-time {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--brass);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 3px;
+  outline: none;
+  margin-bottom: 6px;
+}
+.bc-time:focus { border-color: var(--brass); }
+.bc-time::placeholder { color: #55503f; }
+.bc-add-time { max-width: 40%; }

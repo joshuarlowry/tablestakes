@@ -194,12 +194,17 @@ export function createGameClient({
       }
       view.board = {
         ...view.board,
-        columns: view.board.columns.map(col => ({
-          ...col,
-          cards: [...col.cards, ...(draftsByCol.get(col.key) || [])]
-            .map(c => ({ ...c, mine: c.author === self }))
-            .sort(compareCards),
-        })),
+        columns: view.board.columns.map(col => {
+          const drafts = draftsByCol.get(col.key);
+          // deriveView already sorted each column with the game's own comparator
+          // (e.g. AAR's chronological Timeline). Only re-sort when merging local
+          // drafts in — and drafts only ever exist in blind mode, which no
+          // timeline-sorted game uses, so compareCards is safe there.
+          const merged = drafts
+            ? [...col.cards, ...drafts].sort(compareCards)
+            : col.cards;
+          return { ...col, cards: merged.map(c => ({ ...c, mine: c.author === self })) };
+        }),
       };
     }
     return view;
@@ -335,6 +340,22 @@ export function createGameClient({
     publishCard(cardId, existing.ver + 1, { ...existing, col, order });
   }
 
+  // Setting a timeline card's time is a rearrange, not a content edit, so it's
+  // open to everyone (same as moveCard) — not gated to the author.
+  function retimeCard(cardId, time) {
+    const t = String(time).slice(0, 20);
+    if (localDraftCards.has(cardId)) {
+      const d = localDraftCards.get(cardId);
+      localDraftCards.set(cardId, { ...d, time: t });
+      saveDraftStash();
+      notify();
+      return;
+    }
+    const existing = state.cards[state.round]?.[cardId];
+    if (!existing) return;
+    publishCard(cardId, existing.ver + 1, { ...existing, time: t });
+  }
+
   function deleteCard(cardId) {
     if (localDraftCards.has(cardId)) {
       const d = localDraftCards.get(cardId);
@@ -361,7 +382,7 @@ export function createGameClient({
     self,
     join, heartbeat, tick,
     lock, selectGame, backToLobby, forceReveal, leave, handOff,
-    addCard, editCard, moveCard, deleteCard, revealCards,
+    addCard, editCard, moveCard, deleteCard, retimeCard, revealCards,
     processVerifications, getView, onChange,
     _debug: () => ({ state, verified }),
   };

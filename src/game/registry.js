@@ -21,8 +21,9 @@ import ranked from '../games/ranked.js';
 import health from '../games/health.js';
 import turn from '../games/turn.js';
 import retro from '../games/retro.js';
+import aar from '../games/aar.js';
 
-const entries = [points, f2f, motion, ranked, health, turn, retro, rps];
+const entries = [points, f2f, motion, ranked, health, turn, retro, aar, rps];
 
 export const registry = Object.fromEntries(entries.map(g => [g.id, g]));
 export const gameList = entries;

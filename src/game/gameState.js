@@ -140,13 +140,18 @@ export function compareCards(a, b) {
 
 function deriveBoard(state, gameDef, config, round) {
   const roundCards = state.cards[round] || {};
-  const columns = gameDef.columnsFor(config).map(col => ({
-    ...col,
-    cards: Object.entries(roundCards)
-      .filter(([, c]) => c.col === col.key && !c.deleted)
-      .map(([cardId, c]) => ({ cardId, ...c }))
-      .sort(compareCards),
-  }));
+  const columns = gameDef.columnsFor(config).map(col => {
+    // A board game may sort some columns differently (e.g. AAR's Timeline is
+    // chronological); default is the plain fractional-index comparator.
+    const cmp = gameDef.cardComparatorFor ? gameDef.cardComparatorFor(col, config) : compareCards;
+    return {
+      ...col,
+      cards: Object.entries(roundCards)
+        .filter(([, c]) => c.col === col.key && !c.deleted)
+        .map(([cardId, c]) => ({ cardId, ...c }))
+        .sort(cmp),
+    };
+  });
   return { columns, cardsRevealed: !!state.cardsRevealed[round], privacy: config.privacy };
 }
 
